@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./python-Backend/backend
+    ports:
+      - "8000:8000"
+    environment:
+      - SECRET_KEY=your-secret-key-here
+      - DEBUG=False
+      - ALLOWED_HOSTS=*
+      - BASE_URL=http://localhost:3000
+      - RAZORPAY_KEY_ID=rzp_test_hf54kCj6NjigUj
+      - RAZORPAY_SECRET=GmCuH0pPD5BS582jPdhzDycp
+    volumes:
+      - ./python-Backend/backend/db.sqlite3:/app/db.sqlite3
