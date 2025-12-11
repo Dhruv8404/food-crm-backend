@@ -168,17 +168,15 @@ BASE_URL = config('BASE_URL', default='http://localhost:3000')
 # Razorpay settings
 RAZORPAY_KEY_ID = config('RAZORPAY_KEY_ID', default='rzp_test_hf54kCj6NjigUj')
 RAZORPAY_SECRET = config('RAZORPAY_SECRET', default='GmCuH0pPD5BS582jPdhzDycp')
+CORS_ALLOW_ALL_ORIGINS = False
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://rood-crm-frontend-wmek.vercel.app",  # ✅ Correct
+    "https://rood-crm-frontend-f1r5.vercel.app",
 ]
-
 
 CSRF_TRUSTED_ORIGINS = [
     "https://food-crm-backend.onrender.com",
-    "https://rood-crm-frontend-wmek.vercel.app/",
+    "https://rood-crm-frontend-f1r5.vercel.app",
 ]
 
-CORS_ALLOW_ALL_ORIGINS = False     # recommended
+CORS_ALLOW_CREDENTIALS = True
