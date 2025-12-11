@@ -172,12 +172,13 @@ RAZORPAY_SECRET = config('RAZORPAY_SECRET', default='GmCuH0pPD5BS582jPdhzDycp')
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://rood-crm-frontend-wmek.vercel.app/",  # add when frontend live
+    "https://rood-crm-frontend-wmek.vercel.app",  # ✅ Correct
 ]
+
 
 CSRF_TRUSTED_ORIGINS = [
     "https://food-crm-backend.onrender.com",
     "https://rood-crm-frontend-wmek.vercel.app/",
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = False     # recommended
