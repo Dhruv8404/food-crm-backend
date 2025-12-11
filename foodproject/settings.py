@@ -26,8 +26,11 @@ SECRET_KEY = config('SECRET_KEY', default='your-secret-key-here')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']
-
+ALLOWED_HOSTS = [
+    "food-crm-backend.onrender.com",
+    "localhost",
+    "127.0.0.1"
+]
 
 # Application definition
 
@@ -124,12 +127,11 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
-
-STATIC_URL = 'static/'
-
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / "staticfiles"   # REQUIRED FOR RENDER BUILD
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
-
+BASE_URL = "https://food-crm-backend.onrender.com"
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Email settings
@@ -166,3 +168,16 @@ BASE_URL = config('BASE_URL', default='http://localhost:3000')
 # Razorpay settings
 RAZORPAY_KEY_ID = config('RAZORPAY_KEY_ID', default='rzp_test_hf54kCj6NjigUj')
 RAZORPAY_SECRET = config('RAZORPAY_SECRET', default='GmCuH0pPD5BS582jPdhzDycp')
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://rood-crm-frontend-wmek.vercel.app/",  # add when frontend live
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://food-crm-backend.onrender.com",
+    "https://rood-crm-frontend-wmek.vercel.app/",
+]
+
+CORS_ALLOW_ALL_ORIGINS = True
