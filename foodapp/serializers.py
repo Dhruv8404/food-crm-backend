@@ -77,40 +77,56 @@ class TableSerializer(serializers.ModelSerializer):
         except:
             pass
         return None
-
 class TableGenerationSerializer(serializers.Serializer):
-    """Serializer for generating multiple tables with QR codes"""
-    tables = serializers.ListField(
-        child=serializers.CharField(max_length=10),
-        required=False,
-        help_text="List of specific table numbers (e.g., ['T01', 'T02'])"
-    )
-    count = serializers.IntegerField(
-        min_value=1,
-        max_value=50,
-        required=False,
-        help_text="Number of sequential tables to generate"
-    )
+    """
+    This serializer now supports:
+      - range: "1"
+      - range: "T1"
+      - range: "T1-T5"
+      - range: "T1,T3,T5"
+    """
+    range = serializers.CharField(required=True)
 
-    def validate(self, data):
-        """Ensure either tables or count is provided, not both."""
-        tables = data.get('tables')
-        count = data.get('count')
+    def validate_range(self, value):
+        value = value.strip().upper()
 
-        if not tables and not count:
-            raise serializers.ValidationError("Either 'tables' or 'count' must be provided.")
-        if tables and count:
-            raise serializers.ValidationError("Provide only one of 'tables' or 'count', not both.")
-        return data
+        # CASE 1: pure number -> count
+        if value.isdigit():
+            return {"mode": "count", "count": int(value)}
 
-    def validate_tables(self, value):
-        """Validate each table number format."""
-        for table_no in value:
-            if not re.match(r'^T\d{2,3}$', table_no.strip().upper()):
-                raise serializers.ValidationError(
-                    f"Invalid table number: {table_no}. Must be like T01, T101."
-                )
-        return [t.strip().upper() for t in value]
+        # CASE 2: single table "T1"
+        if re.match(r"^T\d{1,3}$", value):
+            return {"mode": "single", "tables": [value]}
+
+        # CASE 3: range "T1-T5"
+        if "-" in value:
+            try:
+                start, end = value.split("-")
+                s = int(start.replace("T", ""))
+                e = int(end.replace("T", ""))
+
+                if s > e:
+                    raise serializers.ValidationError("Invalid range: start cannot be greater than end")
+
+                tables = [f"T{str(i).zfill(2)}" for i in range(s, e + 1)]
+                return {"mode": "multiple", "tables": tables}
+            except:
+                raise serializers.ValidationError("Invalid range format. Use: T1-T5")
+
+        # CASE 4: list "T1,T3,T5"
+        if "," in value:
+            raw = value.split(",")
+            tables = []
+
+            for t in raw:
+                t = t.strip()
+                if not re.match(r"^T\d{1,3}$", t):
+                    raise serializers.ValidationError(f"Invalid table number: {t}")
+                tables.append(t)
+
+            return {"mode": "multiple", "tables": tables}
+
+        raise serializers.ValidationError("Invalid format. Use: '1', 'T1', 'T1-T5', or 'T1,T3,T5'")
 
 # For auth
 class CustomerRegisterSerializer(serializers.Serializer):

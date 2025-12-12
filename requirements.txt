@@ -1,13 +1,30 @@
 Django==4.2.16
 djangorestframework==3.16.1
 djangorestframework-simplejwt==5.3.0
+
+# CORS
+django-cors-headers==4.9.0
+
+# Email (SMTP already included in Django)
+
+# Environment variables
+python-decouple==3.8
+
+# QR Code
+segno==1.6.0
+
+# Images
+Pillow==10.4.0
+
+# Mongo (if you're not using Mongo, remove these)
 mongoengine
 pymongo==4.15.3
-django-cors-headers==4.9.0
-python-decouple==3.8
-pytz==2024.1
+
+# Razorpay
 razorpay==1.4.2
+
+# Deployment server (Render uses this)
 gunicorn==21.2.0
-Pillow==10.4.0
-segno==1.6.0
-django-storages
+
+# Timezone
+pytz==2024.1

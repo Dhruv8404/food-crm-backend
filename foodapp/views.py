@@ -30,6 +30,19 @@ import re
 from io import BytesIO
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+
+EMAIL_HOST_USER = 'pateldhruv8404@gmail.com'
+EMAIL_HOST_PASSWORD = 'chqmyfrojxnpwtid'  # Gmail App Password
+
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def menu_list(request):
@@ -249,44 +262,88 @@ class OrderUpdateView(generics.RetrieveUpdateDestroyAPIView):
         return super().destroy(request, *args, **kwargs)
 # In your views.py
 
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def generate_table(request):
     """
-    Production-ready table and QR code generation.
+    Accepts:
+      {
+        "range": "1"
+        "range": "T1"
+        "range": "T1-T5"
+        "range": "T1,T3,T5"
+      }
     """
-    if request.user.role != 'admin':
-        return Response({'error': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+    if request.user.role != "admin":
+        return Response({"error": "Permission denied"}, status=403)
 
-    # Use the serializer for validation
-    serializer = TableGenerationSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    validated_data = serializer.validated_data
-    tables_input = validated_data.get('tables', [])
-    count = validated_data.get('count', 0)
-    
+    raw_range = request.data.get("range", "").strip()
+
+    if not raw_range:
+        return Response({"error": "Range input required"}, status=400)
+
     table_numbers = []
 
-    # Determine the list of table numbers to create
-    if tables_input:
-        table_numbers = tables_input
-    elif count:
-        # Generate sequential table numbers
+    # -------------------------
+    # CASE 1: SIMPLE COUNT (ex: "3")
+    # -------------------------
+    if raw_range.isdigit():
+        count = int(raw_range)
+
         last_table = Table.objects.order_by('-id').first()
         start_num = int(last_table.table_no[1:]) + 1 if last_table else 1
-        table_numbers = [f"T{str(i + start_num).zfill(2)}" for i in range(count)]
 
+        for i in range(count):
+            tno = f"T{str(start_num + i).zfill(2)}"
+            table_numbers.append(tno)
+
+    # -------------------------
+    # CASE 2: SINGLE TABLE (ex: "T1")
+    # -------------------------
+    elif raw_range.upper().startswith("T") and "-" not in raw_range and "," not in raw_range:
+        table_numbers.append(raw_range.upper())
+
+    # -------------------------
+    # CASE 3: RANGE (ex: "T1-T5")
+    # -------------------------
+    elif "-" in raw_range:
+        try:
+            start, end = raw_range.split("-")
+            s = int(start.replace("T", ""))
+            e = int(end.replace("T", ""))
+
+            for i in range(s, e + 1):
+                table_numbers.append(f"T{str(i).zfill(2)}")
+        except:
+            return Response({"error": "Invalid range format"}, status=400)
+
+    # -------------------------
+    # CASE 4: LIST LIKE "T1,T3,T5"
+    # -------------------------
+    elif "," in raw_range:
+        parts = raw_range.split(",")
+        for p in parts:
+            p = p.strip().upper()
+            if not p.startswith("T"):
+                return Response({"error": "Invalid table format"}, status=400)
+            table_numbers.append(p)
+
+    else:
+        return Response({"error": "Invalid input format"}, status=400)
+
+    # -------------------------
+    # GENERATE TABLES
+    # -------------------------
     results = []
-    base_url = getattr(settings, 'BASE_URL', 'http://localhost:3000')
+    base_url = getattr(settings, "BASE_URL", "http://localhost:3000")
 
     for table_no in table_numbers:
-        # Generate secure token
+
         url_token = secrets.token_urlsafe(32)
         table_url = f"{base_url}/scan/{url_token}"
 
-        # Create Table record
         table = Table.objects.create(
             table_no=table_no,
             hash=url_token,
@@ -294,35 +351,25 @@ def generate_table(request):
             created_by=request.user
         )
 
-        # Generate QR code
-        qr_code = segno.make(table_url)  # Use make() instead of make_qr()
+        qr_code = segno.make(table_url)
         buffer = BytesIO()
-        qr_code.save(buffer, kind='png', scale=8, border=4)
+        qr_code.save(buffer, kind="png", scale=8, border=4)
         buffer.seek(0)
 
-        # Create TableQR record
-        qr_image_name = f'qr_table_{table_no}_{url_token[:8]}.png'
-        
-        # Save file to storage
-        file_path = f'qr_codes/{qr_image_name}'
+        image_name = f"qr_table_{table_no}_{url_token[:8]}.png"
+        file_path = f"qr_codes/{image_name}"
         saved_path = default_storage.save(file_path, ContentFile(buffer.getvalue()))
-        
-        # Create TableQR object
-        table_qr = TableQR.objects.create(
-            table=table,
-            url=table_url,
-            image=saved_path
-        )
 
-        # Prepare response
         results.append({
-            'table_no': table.table_no,
-            'hash': table.hash,
-            'url': table_url,
-            'qr_code_url': request.build_absolute_uri(table_qr.image.url) if table_qr.image else None,
+            "table_no": table_no,
+            "hash": url_token,
+            "url": table_url,
+            "qr_code_url": request.build_absolute_uri(f"/media/{saved_path}")
         })
 
-    return Response(results, status=status.HTTP_201_CREATED)
+    return Response(results, status=201)
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def verify_table(request, table_no=None, hash_val=None):
