@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import timedelta
+import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -12,6 +13,9 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
 ]
 
+# ----------------------------
+# INSTALLED APPS
+# ----------------------------
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -19,23 +23,28 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+
     'rest_framework',
     'corsheaders',
     'rest_framework_simplejwt',
+
     'foodapp',
 ]
 
 AUTH_USER_MODEL = 'foodapp.User'
 
+# ----------------------------
+# MIDDLEWARE (CORS MUST BE FIRST)
+# ----------------------------
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "corsheaders.middleware.CorsMiddleware",   # MUST BE FIRST
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
 ROOT_URLCONF = 'foodproject.urls'
@@ -58,6 +67,9 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'foodproject.wsgi.application'
 
+# ----------------------------
+# DATABASE
+# ----------------------------
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -69,6 +81,9 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
 ]
 
+# ----------------------------
+# GLOBAL
+# ----------------------------
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
@@ -77,37 +92,34 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# -----------------------------
-# EMAIL SETTINGS (SMTP)
-# -----------------------------
+# ----------------------------
+# EMAIL (GMAIL SMTP)
+# ----------------------------
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 
 EMAIL_HOST_USER = 'pateldhruv8404@gmail.com'
-EMAIL_HOST_PASSWORD = 'chqmyfrojxnpwtid'  # Gmail App Password
-  # <-- Correct App Password
+EMAIL_HOST_PASSWORD = 'chqmyfrojxnpwtid'   # Gmail App Password
 
-# -----------------------------
-# CORS & CSRF SETTINGS
-# -----------------------------
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+# ----------------------------
+# CORS SETTINGS
+# ----------------------------
 CORS_ALLOW_ALL_ORIGINS = False
 
 CORS_ALLOWED_ORIGINS = [
     "https://rood-crm-frontend-f1r5.vercel.app",
-    "http://rood-crm-frontend-f1r5.vercel.app",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
-
-CSRF_TRUSTED_ORIGINS = [
-    "https://food-crm-backend.onrender.com",
-    "https://rood-crm-frontend-f1r5.vercel.app",
-]
 
 CORS_ALLOW_HEADERS = [
     "authorization",
@@ -117,7 +129,6 @@ CORS_ALLOW_HEADERS = [
     "user-agent",
     "cookie",
     "x-csrftoken",
-    "accept-language",
 ]
 
 CORS_ALLOW_METHODS = [
@@ -129,9 +140,17 @@ CORS_ALLOW_METHODS = [
     "OPTIONS",
 ]
 
-# -----------------------------
-# REST FRAMEWORK
-# -----------------------------
+# ----------------------------
+# CSRF – Required for Vercel & Render
+# ----------------------------
+CSRF_TRUSTED_ORIGINS = [
+    "https://food-crm-backend.onrender.com",
+    "https://rood-crm-frontend-f1r5.vercel.app",
+]
+
+# ----------------------------
+# REST & JWT
+# ----------------------------
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.SessionAuthentication',
@@ -144,20 +163,18 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
 }
 
-# -----------------------------
-# BASE URL (IMPORTANT)
-# -----------------------------
-BASE_URL = "https://rood-crm-frontend-f1r5.vercel.app"
+# ----------------------------
+# BASE URL FOR QR SCAN
+# ----------------------------
+BASE_URL = "https://food-crm-backend.onrender.com"
 
-# -----------------------------
-# RAZORPAY CONFIG
-# -----------------------------
+# ----------------------------
+# RAZORPAY
+# ----------------------------
 RAZORPAY_KEY_ID = "rzp_test_hf54kCj6NjigUj"
 RAZORPAY_SECRET = "GmCuH0pPD5BS582jPdhzDycp"
 
-# -----------------------------
-# FILE STORAGE BACKEND
-# -----------------------------
+# ----------------------------
+# FILE STORAGE
+# ----------------------------
 DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
-MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
