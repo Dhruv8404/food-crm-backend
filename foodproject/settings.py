@@ -138,6 +138,23 @@ SIMPLE_JWT = {
 # BASE URL for QR codes
 BASE_URL = "https://food-crm-backend.onrender.com"
 
+CORS_ALLOW_METHODS = [
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+]
+
+CORS_ALLOW_HEADERS = [
+    "authorization",
+    "content-type",
+    "accept",
+    "origin",
+    "user-agent",
+    "cookie",
+]
 
 # Razorpay
 RAZORPAY_KEY_ID = config('RAZORPAY_KEY_ID', default='rzp_test_hf54kCj6NjigUj')
