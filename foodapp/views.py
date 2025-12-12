@@ -322,7 +322,8 @@ def generate_table(request):
             'qr_code_url': request.build_absolute_uri(table_qr.image.url) if table_qr.image else None,
         })
 
-    return Response(results, status=status.HTTP_201_CREATED)@api_view(['GET'])
+    return Response(results, status=status.HTTP_201_CREATED)
+@api_view(['GET'])
 @permission_classes([AllowAny])
 def verify_table(request, table_no=None, hash_val=None):
     if not table_no or not hash_val:
