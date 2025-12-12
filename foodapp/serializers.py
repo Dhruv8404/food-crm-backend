@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import MenuItem, Order, User, Table
-
+from .models import Table, TableQR
+import re
 class MenuItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = MenuItem
@@ -56,10 +57,60 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = '__all__'
 
+
+
+
 class TableSerializer(serializers.ModelSerializer):
+    """Serializer for Table model"""
+    qr_code_url = serializers.SerializerMethodField()
+    
     class Meta:
         model = Table
-        fields = '__all__'
+        fields = ['id', 'table_no', 'hash', 'active', 'created_at', 'created_by', 'qr_code_url']
+        read_only_fields = ['hash', 'created_at', 'created_by']
+    
+    def get_qr_code_url(self, obj):
+        """Get the QR code image URL if it exists"""
+        try:
+            if hasattr(obj, 'qr_code') and obj.qr_code.image:
+                return obj.qr_code.image.url
+        except:
+            pass
+        return None
+
+class TableGenerationSerializer(serializers.Serializer):
+    """Serializer for generating multiple tables with QR codes"""
+    tables = serializers.ListField(
+        child=serializers.CharField(max_length=10),
+        required=False,
+        help_text="List of specific table numbers (e.g., ['T01', 'T02'])"
+    )
+    count = serializers.IntegerField(
+        min_value=1,
+        max_value=50,
+        required=False,
+        help_text="Number of sequential tables to generate"
+    )
+
+    def validate(self, data):
+        """Ensure either tables or count is provided, not both."""
+        tables = data.get('tables')
+        count = data.get('count')
+
+        if not tables and not count:
+            raise serializers.ValidationError("Either 'tables' or 'count' must be provided.")
+        if tables and count:
+            raise serializers.ValidationError("Provide only one of 'tables' or 'count', not both.")
+        return data
+
+    def validate_tables(self, value):
+        """Validate each table number format."""
+        for table_no in value:
+            if not re.match(r'^T\d{2,3}$', table_no.strip().upper()):
+                raise serializers.ValidationError(
+                    f"Invalid table number: {table_no}. Must be like T01, T101."
+                )
+        return [t.strip().upper() for t in value]
 
 # For auth
 class CustomerRegisterSerializer(serializers.Serializer):

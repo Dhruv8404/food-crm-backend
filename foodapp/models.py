@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
-
+import secrets
+from django.conf import settings
 class User(AbstractUser):
     ROLE_CHOICES = [
         ('guest', 'Guest'),
@@ -75,11 +76,24 @@ class OTP(models.Model):
     def __str__(self):
         return f"OTP for {self.email}"
 
+
+
 class Table(models.Model):
-    table_no = models.CharField(max_length=10, unique=True)  # e.g., 'T1', 'T2'
-    hash = models.CharField(max_length=64, unique=True)  # unique hash for security
+    table_no = models.CharField(max_length=10, unique=True)
+    hash = models.CharField(max_length=64, unique=True)  # Increased length for token_urlsafe
     active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True)
 
     def __str__(self):
-        return f"Table {self.table_no}"
+        return self.table_no
+
+class TableQR(models.Model):
+    """Stores the generated QR code image for a table."""
+    table = models.OneToOneField(Table, on_delete=models.CASCADE, related_name='qr_code')
+    image = models.ImageField(upload_to='qr_codes/')
+    url = models.URLField()  # The URL encoded in the QR
+    generated_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"QR for {self.table.table_no}"

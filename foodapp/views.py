@@ -14,9 +14,22 @@ import random
 import string
 import secrets
 import razorpay
-
-
-
+from io import BytesIO
+from django.core.files.base import ContentFile
+from .models import Table, TableQR
+from .serializers import (
+    MenuItemSerializer, OrderSerializer, UserSerializer, 
+    CustomerRegisterSerializer, StaffLoginSerializer, 
+    CustomerVerifySerializer, CustomerLoginSerializer, 
+    TableSerializer, TableGenerationSerializer  # Add these
+)
+# Then update the generate_table function:
+import segno
+import base64
+import re
+from io import BytesIO
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def menu_list(request):
@@ -234,77 +247,82 @@ class OrderUpdateView(generics.RetrieveUpdateDestroyAPIView):
         if user.role != 'admin':
             raise PermissionDenied("Only admins can delete orders.")
         return super().destroy(request, *args, **kwargs)
+# In your views.py
 
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def generate_table(request):
-    if not request.user.is_authenticated or request.user.role != 'admin':
-        return Response({'error': 'Only admins can generate tables'}, status=status.HTTP_403_FORBIDDEN)
+    """
+    Production-ready table and QR code generation.
+    """
+    if request.user.role != 'admin':
+        return Response({'error': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-    range_input = request.data.get('range', '1')
-    table_nos = []
+    # Use the serializer for validation
+    serializer = TableGenerationSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    validated_data = serializer.validated_data
+    tables_input = validated_data.get('tables', [])
+    count = validated_data.get('count', 0)
+    
+    table_numbers = []
 
-    if '-' in range_input:
-        # Range like T1-T5
-        start, end = range_input.split('-')
-        if start.startswith('T') and end.startswith('T'):
-            try:
-                start_num = int(start[1:])
-                end_num = int(end[1:])
-                if start_num > end_num or end_num - start_num > 50:
-                    return Response({'error': 'Invalid range'}, status=status.HTTP_400_BAD_REQUEST)
-                table_nos = [f'T{i}' for i in range(start_num, end_num + 1)]
-            except ValueError:
-                return Response({'error': 'Invalid range format'}, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            return Response({'error': 'Range must be like T1-T5'}, status=status.HTTP_400_BAD_REQUEST)
-    elif range_input.startswith('T'):
-        # Single table like T1
-        table_nos = [range_input]
-    else:
-        # Number, generate that many sequential
-        try:
-            count = int(range_input)
-            if count < 1 or count > 50:
-                return Response({'error': 'Count must be between 1 and 50'}, status=status.HTTP_400_BAD_REQUEST)
-            last_table = Table.objects.order_by('-id').first()
-            if last_table:
-                try:
-                    num = int(last_table.table_no[1:]) + 1
-                except ValueError:
-                    num = 1
-            else:
-                num = 1
-            table_nos = [f'T{num + i}' for i in range(count)]
-        except ValueError:
-            return Response({'error': 'Invalid input'}, status=status.HTTP_400_BAD_REQUEST)
+    # Determine the list of table numbers to create
+    if tables_input:
+        table_numbers = tables_input
+    elif count:
+        # Generate sequential table numbers
+        last_table = Table.objects.order_by('-id').first()
+        start_num = int(last_table.table_no[1:]) + 1 if last_table else 1
+        table_numbers = [f"T{str(i + start_num).zfill(2)}" for i in range(count)]
 
     results = []
-    for table_no in table_nos:
-        if Table.objects.filter(table_no=table_no).exists():
-            table = Table.objects.get(table_no=table_no)
-            if 'hash' in request.data:
-                hash_value = request.data['hash']
-                table.hash = hash_value
-                table.save()
-            else:
-                hash_value = table.hash  # Keep existing hash
-        else:
-            hash_value = request.data.get('hash', secrets.token_hex(16))
-            table = Table.objects.create(table_no=table_no, hash=hash_value)
+    base_url = getattr(settings, 'BASE_URL', 'http://localhost:3000')
 
-        base_url = getattr(settings, 'BASE_URL', 'http://localhost:3000')
-        url = f"{base_url}/{hash_value}/{table.table_no}"
+    for table_no in table_numbers:
+        # Generate secure token
+        url_token = secrets.token_urlsafe(32)
+        table_url = f"{base_url}/scan/{url_token}"
 
+        # Create Table record
+        table = Table.objects.create(
+            table_no=table_no,
+            hash=url_token,
+            active=True,
+            created_by=request.user
+        )
+
+        # Generate QR code
+        qr_code = segno.make(table_url)  # Use make() instead of make_qr()
+        buffer = BytesIO()
+        qr_code.save(buffer, kind='png', scale=8, border=4)
+        buffer.seek(0)
+
+        # Create TableQR record
+        qr_image_name = f'qr_table_{table_no}_{url_token[:8]}.png'
+        
+        # Save file to storage
+        file_path = f'qr_codes/{qr_image_name}'
+        saved_path = default_storage.save(file_path, ContentFile(buffer.getvalue()))
+        
+        # Create TableQR object
+        table_qr = TableQR.objects.create(
+            table=table,
+            url=table_url,
+            image=saved_path
+        )
+
+        # Prepare response
         results.append({
             'table_no': table.table_no,
-            'hash': hash_value,
-            'url': url
+            'hash': table.hash,
+            'url': table_url,
+            'qr_code_url': request.build_absolute_uri(table_qr.image.url) if table_qr.image else None,
         })
 
-    return Response(results, status=status.HTTP_201_CREATED)
-
-@api_view(['GET'])
+    return Response(results, status=status.HTTP_201_CREATED)@api_view(['GET'])
 @permission_classes([AllowAny])
 def verify_table(request, table_no=None, hash_val=None):
     if not table_no or not hash_val:
