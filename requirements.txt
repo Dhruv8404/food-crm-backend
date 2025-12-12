@@ -8,5 +8,5 @@ python-decouple==3.8
 pytz==2024.1
 razorpay==1.4.2
 gunicorn==21.2.0
-
 Pillow==10.4.0
+segno==1.6.0
