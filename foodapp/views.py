@@ -254,10 +254,6 @@ class OrderUpdateView(generics.RetrieveUpdateDestroyAPIView):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def generate_table(request):
-    """
-    Generates tables with QR code URLs like:
-    https://rood-crm-frontend-f1r5.vercel.app/scan/T04/<hash>
-    """
     if request.user.role != "admin":
         return Response({"error": "Permission denied"}, status=403)
 
@@ -274,67 +270,66 @@ def generate_table(request):
         start_num = int(last_table.table_no[1:]) + 1 if last_table else 1
 
         for i in range(count):
-            tno = f"T{str(start_num + i).zfill(2)}"
-            table_numbers.append(tno)
+            table_numbers.append(f"T{str(start_num + i).zfill(2)}")
 
-    # CASE 2: single "T1"
+    # CASE 2: "T1"
     elif raw_range.upper().startswith("T") and "-" not in raw_range and "," not in raw_range:
         table_numbers.append(raw_range.upper())
 
-    # CASE 3: range "T1-T5"
+    # CASE 3: "T1-T5"
     elif "-" in raw_range:
         try:
             start, end = raw_range.split("-")
             s = int(start.replace("T", ""))
             e = int(end.replace("T", ""))
-
             for i in range(s, e + 1):
                 table_numbers.append(f"T{str(i).zfill(2)}")
         except:
             return Response({"error": "Invalid range"}, status=400)
 
-    # CASE 4: List "T1,T3,T5"
+    # CASE 4: "T1,T3,T5"
     elif "," in raw_range:
-        parts = raw_range.split(",")
-        for p in parts:
-            p = p.strip().upper()
-            table_numbers.append(p)
+        for p in raw_range.split(","):
+            table_numbers.append(p.strip().upper())
+
     else:
         return Response({"error": "Invalid format"}, status=400)
 
-    results = []
     frontend_base = "https://rood-crm-frontend-f1r5.vercel.app"
+    results = []
 
     for table_no in table_numbers:
-        url_token = secrets.token_urlsafe(32)
+        # ✅ PREVENT DUPLICATES
+        if Table.objects.filter(table_no=table_no).exists():
+            continue
 
-        # Store in DB
+        token = secrets.token_urlsafe(32)
+        scan_url = f"{frontend_base}/scan/{table_no}/{token}"
+
         table = Table.objects.create(
             table_no=table_no,
-            hash=url_token,
+            hash=token,
             active=True,
             created_by=request.user
         )
 
-        # ---------- FIXED QR URL ----------
-        scan_url = f"{frontend_base}/scan/{table_no}/{url_token}"
-
-        # Generate QR PNG
         qr = segno.make(scan_url)
         buffer = BytesIO()
-        qr.save(buffer, kind="png", scale=8, border=4)
+        qr.save(buffer, kind="png", scale=8)
         buffer.seek(0)
 
-        file_name = f"qr_{table_no}_{url_token[:6]}.png"
-        file_path = f"qr_codes/{file_name}"
-        saved_path = default_storage.save(file_path, ContentFile(buffer.getvalue()))
+        file_name = f"qr_{table_no}_{token[:6]}.png"
+        path = default_storage.save(f"qr_codes/{file_name}", ContentFile(buffer.read()))
 
         results.append({
             "table_no": table_no,
-            "hash": url_token,
+            "hash": token,
             "scan_url": scan_url,
-            "qr_code_url": request.build_absolute_uri(f"/media/{saved_path}")
+            "qr_code_url": request.build_absolute_uri(f"/media/{path}")
         })
+
+    if not results:
+        return Response({"error": "All tables already exist"}, status=400)
 
     return Response(results, status=201)
 
@@ -371,16 +366,17 @@ def delete_table(request, table_no):
 @permission_classes([AllowAny])
 def list_tables(request):
     tables = Table.objects.filter(active=True)
-    base_url = getattr(settings, 'BASE_URL', 'http://localhost:3000')
-    table_data = []
+    frontend_base = "https://rood-crm-frontend-f1r5.vercel.app"
+
+    data = []
     for table in tables:
-        url = f"{base_url}/{table.hash}/{table.table_no}"
-        table_data.append({
-            'table_no': table.table_no,
-            'hash': table.hash,
-            'url': url
+        data.append({
+            "table_no": table.table_no,
+            "hash": table.hash,
+            "scan_url": f"{frontend_base}/scan/{table.table_no}/{table.hash}"
         })
-    return Response(table_data)
+
+    return Response(data)
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
