@@ -331,7 +331,6 @@ from django.utils.timezone import now
 from django.utils.timezone import now
 from datetime import timedelta
 import uuid
-
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def verify_table(request, table_no, hash_val):
@@ -349,11 +348,18 @@ def verify_table(request, table_no, hash_val):
                 status=410
             )
 
-        # 🔐 Lock table if not locked
-        if not table.session_id:
-            table.session_id = uuid.uuid4()
-            table.locked_at = now()
-            table.save()
+        # 🔐 Table already in use
+        if table.session_id:
+            return Response({
+                "valid": False,
+                "reason": "TABLE_IN_USE",
+                "table_no": table.table_no
+            }, status=409)
+
+        # 🔐 Lock table
+        table.session_id = uuid.uuid4()
+        table.locked_at = now()
+        table.save()
 
         return Response({
             "valid": True,
