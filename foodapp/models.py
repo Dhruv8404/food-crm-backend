@@ -78,12 +78,27 @@ class OTP(models.Model):
 
 
 
+import uuid
+from django.db import models
+from django.conf import settings
+
 class Table(models.Model):
     table_no = models.CharField(max_length=10, unique=True)
-    hash = models.CharField(max_length=64, unique=True)  # Increased length for token_urlsafe
+    hash = models.CharField(max_length=64, unique=True)
     active = models.BooleanField(default=True)
+
+    # ⏳ QR creation time (already present, keep it)
     created_at = models.DateTimeField(auto_now_add=True)
-    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True)
+
+    # 🔐 SESSION LOCKING (NEW)
+    session_id = models.UUIDField(null=True, blank=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True
+    )
 
     def __str__(self):
         return self.table_no

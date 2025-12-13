@@ -186,26 +186,22 @@ class OrderListCreateView(generics.ListCreateAPIView):
         return Order.objects.none()
 
     def perform_create(self, serializer):
-        # Set customer from request.user
-        table_no = serializer.validated_data.get('table_no') or self.request.data.get('table_no')
-        if self.request.user.is_authenticated and self.request.user.role == 'admin' and not table_no:
-            # Admin creating parcel order
-            customer_data = {}
-        elif self.request.user.is_authenticated:
-            customer_data = {'phone': self.request.user.phone, 'email': self.request.user.email}
-        else:
-            # Unauthenticated user (table order)
-            customer_data = {}
-        # Calculate total from items
+        table_no = self.request.data.get("table_no")
+        session_id = self.request.data.get("session_id")
+
+        if table_no:
+         table = Table.objects.get(table_no=table_no)
+
+        if not table.session_id or str(table.session_id) != session_id:
+            raise PermissionDenied("Invalid table session")
+
         items = serializer.validated_data.get('items', [])
         total = sum(item['price'] * item.get('quantity', 1) for item in items)
-        # Generate unique id
-        while True:
-            order_id = 'ord_' + ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-            if not Order.objects.filter(id=order_id).exists():
-                break
-        serializer.save(customer=customer_data, total=total, table_no=table_no, id=order_id)
 
+        serializer.save(
+            total=total,
+            table_no=table_no
+        )
 class OrderUpdateView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
@@ -327,21 +323,44 @@ def list_tables(request):
         for t in tables
     ])
 
+import uuid
+from django.utils.timezone import now
+
+from django.utils.timezone import now
+from datetime import timedelta
+import uuid
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
-def verify_table(request, table_no=None, hash_val=None):
+def verify_table(request, table_no, hash_val):
     try:
         table = Table.objects.get(
             table_no=table_no,
             hash=hash_val,
             active=True
         )
+
+        # ⏳ QR expiry (30 minutes)
+        if now() - table.created_at > timedelta(minutes=30):
+            return Response(
+                {"valid": False, "reason": "QR_EXPIRED"},
+                status=410
+            )
+
+        # 🔐 Lock table if not locked
+        if not table.session_id:
+            table.session_id = uuid.uuid4()
+            table.locked_at = now()
+            table.save()
+
         return Response({
-            'valid': True,
-            'table_no': table.table_no
+            "valid": True,
+            "table_no": table.table_no,
+            "session_id": str(table.session_id)
         })
+
     except Table.DoesNotExist:
-        return Response({'valid': False}, status=404)
+        return Response({"valid": False}, status=404)
 
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated])
