@@ -185,23 +185,24 @@ class OrderListCreateView(generics.ListCreateAPIView):
             return Order.objects.all()
         return Order.objects.none()
 
-    def perform_create(self, serializer):
-        table_no = self.request.data.get("table_no")
-        session_id = self.request.data.get("session_id")
+def perform_create(self, serializer):
+    table_no = self.request.data.get("table_no")
+    session_id = self.request.data.get("session_id")
 
-        if table_no:
-         table = Table.objects.get(table_no=table_no)
+    if table_no:
+        table = Table.objects.get(table_no=table_no)
 
         if not table.session_id or str(table.session_id) != session_id:
             raise PermissionDenied("Invalid table session")
 
-        items = serializer.validated_data.get('items', [])
-        total = sum(item['price'] * item.get('quantity', 1) for item in items)
+    items = serializer.validated_data.get('items', [])
+    total = sum(item['price'] * item.get('quantity', 1) for item in items)
 
-        serializer.save(
-            total=total,
-            table_no=table_no
-        )
+    serializer.save(
+        total=total,
+        table_no=table_no
+    )
+
 class OrderUpdateView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
@@ -323,6 +324,7 @@ def list_tables(request):
         for t in tables
     ])
 
+
 import uuid
 from django.utils.timezone import now
 
@@ -375,22 +377,7 @@ def delete_table(request, table_no):
     except Table.DoesNotExist:
         return Response({'error': 'Table not found'}, status=status.HTTP_404_NOT_FOUND)
 
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def list_tables(request):
-    tables = Table.objects.filter(active=True)
-    frontend_base = settings.FRONTEND_BASE_URL
 
-
-    data = []
-    for table in tables:
-        data.append({
-            "table_no": table.table_no,
-            "hash": table.hash,
-            "scan_url": f"{frontend_base}/scan/{table.table_no}/{table.hash}"
-        })
-
-    return Response(data)
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
