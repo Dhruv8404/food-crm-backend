@@ -30,6 +30,7 @@ import re
 from io import BytesIO
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.conf import settings
 
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -277,7 +278,7 @@ def generate_table(request):
         return Response({"error": "Invalid input"}, status=400)
 
     results = []
-    frontend_base = "https://rood-crm-frontend-f1r5.vercel.app"
+    frontend_base = settings.FRONTEND_BASE_URL
 
     for table_no in table_numbers:
         hash_val = secrets.token_urlsafe(32)
@@ -313,7 +314,8 @@ def generate_table(request):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def list_tables(request):
-    frontend_base = "https://rood-crm-frontend-f1r5.vercel.app"
+    frontend_base = settings.FRONTEND_BASE_URL
+
     tables = Table.objects.filter(active=True)
 
     return Response([
@@ -358,7 +360,8 @@ def delete_table(request, table_no):
 @permission_classes([AllowAny])
 def list_tables(request):
     tables = Table.objects.filter(active=True)
-    frontend_base = "https://rood-crm-frontend-f1r5.vercel.app"
+    frontend_base = settings.FRONTEND_BASE_URL
+
 
     data = []
     for table in tables:

@@ -111,9 +111,9 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 # ----------------------------
 # FRONTEND BASE URL (IMPORTANT)
 # ----------------------------
-FRONTEND_BASE_URL = (
-    "https://rood-crm-frontend-hixi9de0e-pateldhruv8404-4868s-projects.vercel.app"
-)
+FRONTEND_BASE_URL = "https://rood-crm-frontend.vercel.app"
+frontend_base = FRONTEND_BASE_URL
+
 
 # ----------------------------
 # CORS SETTINGS (FINAL)
