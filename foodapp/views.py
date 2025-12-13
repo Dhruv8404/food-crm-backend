@@ -49,59 +49,49 @@ def menu_list(request):
     items = MenuItem.objects.all()
     serializer = MenuItemSerializer(items, many=True)
     return Response(serializer.data)
-
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def customer_register(request):
-    serializer = CustomerRegisterSerializer(data=request.data)
-    if serializer.is_valid():
-        phone = serializer.validated_data.get('phone')
-        email = serializer.validated_data['email']
+    email = request.data.get('email')
+    phone = request.data.get('phone')
 
-        # Check if customer exists by email (email is unique)
-        customer, created = CustomUser.objects.get_or_create(
-            email=email,
-            defaults={'role': 'customer', 'phone': phone, 'username': f"{email}_customer", 'is_active': True}
-        )
-        if not created:
-            # Update existing customer
-            customer.role = 'customer'
-            customer.phone = phone
-            customer.is_active = True
-            customer.set_unusable_password()
-            customer.save()
-        else:
-            customer.set_unusable_password()
-            customer.save()
+    if not email or not phone:
+        return Response({'error': 'Email and phone required'}, status=400)
 
-        # Send OTP via email
-        success, message = send_otp_email(email)
-        if success:
-            return Response({'message': 'OTP sent successfully to your email'}, status=status.HTTP_200_OK)
-        else:
-            return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    user, _ = CustomUser.objects.get_or_create(
+        email=email,
+        defaults={
+            'phone': phone,
+            'role': 'customer',
+            'username': email
+        }
+    )
+
+    send_otp_email(email)
+    return Response({'message': 'OTP sent'}, status=200)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def customer_verify(request):
-    print("Request data:", request.data)
-    serializer = CustomerVerifySerializer(data=request.data)
-    if serializer.is_valid():
-        otp = serializer.validated_data['otp']
-        email = serializer.validated_data['email']
+    email = request.data.get('email')
+    otp = request.data.get('otp')
 
-        success, message = verify_otp_util(email, otp)
-        if success:
-            try:
-                user = CustomUser.objects.get(email=email, role='customer')
-                token = RefreshToken.for_user(user).access_token
-                return Response({'message': 'Verified successfully', 'role': 'customer', 'token': str(token)}, status=status.HTTP_200_OK)
-            except CustomUser.DoesNotExist:
-                return Response({'error': 'Customer not found'}, status=status.HTTP_404_NOT_FOUND)
-        else:
-            return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    if not email or not otp:
+        return Response({'error': 'Email & OTP required'}, status=400)
+
+    success, msg = verify_otp(email, otp)
+
+    if not success:
+        return Response({'error': msg}, status=400)
+
+    user = CustomUser.objects.get(email=email, role='customer')
+    token = RefreshToken.for_user(user).access_token
+
+    return Response({
+        'message': 'Verified',
+        'token': str(token),
+        'role': 'customer'
+    }, status=200)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -261,10 +251,13 @@ class OrderUpdateView(generics.RetrieveUpdateDestroyAPIView):
             raise PermissionDenied("Only admins can delete orders.")
         return super().destroy(request, *args, **kwargs)
 # In your views.py
-
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def generate_table(request):
+    """
+    Generates tables with QR code URLs like:
+    https://rood-crm-frontend-f1r5.vercel.app/scan/T04/<hash>
+    """
     if request.user.role != "admin":
         return Response({"error": "Permission denied"}, status=403)
 
@@ -274,51 +267,48 @@ def generate_table(request):
 
     table_numbers = []
 
-    # CASE 1: COUNT
+    # CASE 1: count "3"
     if raw_range.isdigit():
         count = int(raw_range)
         last_table = Table.objects.order_by('-id').first()
-        start = int(last_table.table_no[1:]) + 1 if last_table else 1
+        start_num = int(last_table.table_no[1:]) + 1 if last_table else 1
 
         for i in range(count):
-            table_numbers.append(f"T{str(start + i).zfill(2)}")
+            tno = f"T{str(start_num + i).zfill(2)}"
+            table_numbers.append(tno)
 
-    # CASE 2: "T5"
+    # CASE 2: single "T1"
     elif raw_range.upper().startswith("T") and "-" not in raw_range and "," not in raw_range:
         table_numbers.append(raw_range.upper())
 
-    # CASE 3: RANGE "T1-T5"
+    # CASE 3: range "T1-T5"
     elif "-" in raw_range:
         try:
-            s, e = raw_range.split("-")
-            s = int(s.replace("T",""))
-            e = int(e.replace("T",""))
-            for i in range(s, e+1):
+            start, end = raw_range.split("-")
+            s = int(start.replace("T", ""))
+            e = int(end.replace("T", ""))
+
+            for i in range(s, e + 1):
                 table_numbers.append(f"T{str(i).zfill(2)}")
         except:
-            return Response({"error": "Invalid range format"}, status=400)
+            return Response({"error": "Invalid range"}, status=400)
 
-    # CASE 4: LIST "T1,T3,T5"
+    # CASE 4: List "T1,T3,T5"
     elif "," in raw_range:
-        for item in raw_range.split(","):
-            item = item.strip().upper()
-            if not item.startswith("T"):
-                return Response({"error": "Invalid table format"}, status=400)
-            table_numbers.append(item)
-
+        parts = raw_range.split(",")
+        for p in parts:
+            p = p.strip().upper()
+            table_numbers.append(p)
     else:
         return Response({"error": "Invalid format"}, status=400)
 
     results = []
-    base_url = getattr(settings, "BASE_URL", "http://localhost:3000")
+    frontend_base = "https://rood-crm-frontend-f1r5.vercel.app"
 
     for table_no in table_numbers:
         url_token = secrets.token_urlsafe(32)
 
-        # FIXED URL FORMAT 💥
-        table_url = f"{base_url}/scan/{table_no}/{url_token}"
-
-        # Create table
+        # Store in DB
         table = Table.objects.create(
             table_no=table_no,
             hash=url_token,
@@ -326,38 +316,43 @@ def generate_table(request):
             created_by=request.user
         )
 
-        # Generate QR
-        qr = segno.make(table_url)
-        buf = BytesIO()
-        qr.save(buf, kind="png", scale=8, border=4)
-        buf.seek(0)
+        # ---------- FIXED QR URL ----------
+        scan_url = f"{frontend_base}/scan/{table_no}/{url_token}"
 
-        filename = f"qr_codes/{table_no}_{url_token[:8]}.png"
-        saved = default_storage.save(filename, ContentFile(buf.getvalue()))
+        # Generate QR PNG
+        qr = segno.make(scan_url)
+        buffer = BytesIO()
+        qr.save(buffer, kind="png", scale=8, border=4)
+        buffer.seek(0)
+
+        file_name = f"qr_{table_no}_{url_token[:6]}.png"
+        file_path = f"qr_codes/{file_name}"
+        saved_path = default_storage.save(file_path, ContentFile(buffer.getvalue()))
 
         results.append({
             "table_no": table_no,
             "hash": url_token,
-            "url": table_url,
-            "qr_code_url": request.build_absolute_uri(f"/media/{saved}")
+            "scan_url": scan_url,
+            "qr_code_url": request.build_absolute_uri(f"/media/{saved_path}")
         })
 
     return Response(results, status=201)
 
-
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def verify_table(request, table_no=None, hash_val=None):
-    if not table_no or not hash_val:
-        table_no = request.GET.get('table')
-        hash_val = request.GET.get('hash')
-    if not table_no or not hash_val:
-        return Response({'error': 'Missing table or hash'}, status=status.HTTP_400_BAD_REQUEST)
     try:
-        table = Table.objects.get(table_no=table_no, hash=hash_val, active=True)
-        return Response({'valid': True, 'table_no': table.table_no})
+        table = Table.objects.get(
+            table_no=table_no,
+            hash=hash_val,
+            active=True
+        )
+        return Response({
+            'valid': True,
+            'table_no': table.table_no
+        })
     except Table.DoesNotExist:
-        return Response({'valid': False}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'valid': False}, status=404)
 
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated])

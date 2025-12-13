@@ -104,11 +104,10 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-
 EMAIL_HOST_USER = 'pateldhruv8404@gmail.com'
-EMAIL_HOST_PASSWORD = 'chqmyfrojxnpwtid'   # Gmail App Password
-
+EMAIL_HOST_PASSWORD = 'chqmyfrojxnpwtid'
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
 
 # ----------------------------
 # CORS SETTINGS
@@ -166,7 +165,18 @@ SIMPLE_JWT = {
 # ----------------------------
 # BASE URL FOR QR SCAN
 # ----------------------------
-BASE_URL = "https://food-crm-backend.onrender.com"
+CORS_ALLOW_ALL_ORIGINS = False
+
+CORS_ALLOWED_ORIGINS = [
+    "https://rood-crm-frontend-f1r5.vercel.app",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOW_HEADERS = "*"
+CORS_ALLOW_METHODS = "*"
+
+CORS_EXPOSE_HEADERS = ["Content-Type", "Authorization"]
 
 # ----------------------------
 # RAZORPAY
