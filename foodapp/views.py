@@ -257,81 +257,73 @@ def generate_table(request):
     if request.user.role != "admin":
         return Response({"error": "Permission denied"}, status=403)
 
-    raw_range = request.data.get("range", "").strip()
-    if not raw_range:
-        return Response({"error": "Range input required"}, status=400)
-
     table_numbers = []
 
-    # CASE 1: count "3"
-    if raw_range.isdigit():
-        count = int(raw_range)
+    # ✅ CASE 1: frontend sends count
+    if "count" in request.data:
+        count = int(request.data["count"])
         last_table = Table.objects.order_by('-id').first()
         start_num = int(last_table.table_no[1:]) + 1 if last_table else 1
 
         for i in range(count):
             table_numbers.append(f"T{str(start_num + i).zfill(2)}")
 
-    # CASE 2: "T1"
-    elif raw_range.upper().startswith("T") and "-" not in raw_range and "," not in raw_range:
-        table_numbers.append(raw_range.upper())
+    # ✅ CASE 2: frontend sends tables list
+    elif "tables" in request.data:
+        table_numbers = request.data["tables"]
 
-    # CASE 3: "T1-T5"
-    elif "-" in raw_range:
-        try:
-            start, end = raw_range.split("-")
-            s = int(start.replace("T", ""))
-            e = int(end.replace("T", ""))
-            for i in range(s, e + 1):
-                table_numbers.append(f"T{str(i).zfill(2)}")
-        except:
-            return Response({"error": "Invalid range"}, status=400)
-
-    # CASE 4: "T1,T3,T5"
-    elif "," in raw_range:
-        for p in raw_range.split(","):
-            table_numbers.append(p.strip().upper())
-
+    # ❌ INVALID
     else:
-        return Response({"error": "Invalid format"}, status=400)
+        return Response({"error": "Invalid input"}, status=400)
 
-    frontend_base = "https://rood-crm-frontend-f1r5.vercel.app"
     results = []
+    frontend_base = "https://rood-crm-frontend-f1r5.vercel.app"
 
     for table_no in table_numbers:
-        # ✅ PREVENT DUPLICATES
-        if Table.objects.filter(table_no=table_no).exists():
-            continue
-
-        token = secrets.token_urlsafe(32)
-        scan_url = f"{frontend_base}/scan/{table_no}/{token}"
+        hash_val = secrets.token_urlsafe(32)
 
         table = Table.objects.create(
             table_no=table_no,
-            hash=token,
+            hash=hash_val,
             active=True,
             created_by=request.user
         )
 
+        scan_url = f"{frontend_base}/scan/{table_no}/{hash_val}"
+
         qr = segno.make(scan_url)
         buffer = BytesIO()
-        qr.save(buffer, kind="png", scale=8)
+        qr.save(buffer, kind="png", scale=8, border=4)
         buffer.seek(0)
 
-        file_name = f"qr_{table_no}_{token[:6]}.png"
-        path = default_storage.save(f"qr_codes/{file_name}", ContentFile(buffer.read()))
+        file_name = f"qr_{table_no}_{hash_val[:6]}.png"
+        path = default_storage.save(
+            f"qr_codes/{file_name}",
+            ContentFile(buffer.getvalue())
+        )
 
         results.append({
             "table_no": table_no,
-            "hash": token,
+            "hash": hash_val,
             "scan_url": scan_url,
             "qr_code_url": request.build_absolute_uri(f"/media/{path}")
         })
 
-    if not results:
-        return Response({"error": "All tables already exist"}, status=400)
-
     return Response(results, status=201)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def list_tables(request):
+    frontend_base = "https://rood-crm-frontend-f1r5.vercel.app"
+    tables = Table.objects.filter(active=True)
+
+    return Response([
+        {
+            "table_no": t.table_no,
+            "hash": t.hash,
+            "scan_url": f"{frontend_base}/scan/{t.table_no}/{t.hash}"
+        }
+        for t in tables
+    ])
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
