@@ -12,7 +12,7 @@ urlpatterns = [
     path('auth/customer/login/', views.customer_login),
     path('auth/staff/login/', views.staff_login),
     path('auth/send-otp/', views.send_otp),
-    path('auth/verify-otp/', views.verify_otp),
+    path('auth/verify-otp/', views.customer_verify),
 
     # -------- ORDERS --------
     path('orders/', views.OrderListCreateView.as_view()),

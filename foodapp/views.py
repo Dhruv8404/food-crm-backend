@@ -64,7 +64,6 @@ def customer_register(request):
 
     send_otp_email(email)
     return Response({'message': 'OTP sent'}, status=200)
-
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def customer_verify(request):
@@ -74,19 +73,21 @@ def customer_verify(request):
     if not email or not otp:
         return Response({'error': 'Email & OTP required'}, status=400)
 
-    success, msg = verify_otp(email, otp)
+    success, msg = verify_otp_util(email, otp)
 
     if not success:
         return Response({'error': msg}, status=400)
 
     user = CustomUser.objects.get(email=email, role='customer')
+    OTP.objects.filter(email=email).delete()
+
     token = RefreshToken.for_user(user).access_token
 
     return Response({
         'message': 'Verified',
         'token': str(token),
         'role': 'customer'
-    }, status=200)
+    })
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -106,6 +107,8 @@ def staff_login(request):
             return Response({'message': 'Login successful', 'role': role, 'token': str(token)}, status=status.HTTP_200_OK)
         return Response({'error': 'Invalid credentials'}, status.HTTP_401_UNAUTHORIZED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+# Alias for backward compatibility with URL
+verify_otp = customer_verify
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -120,30 +123,6 @@ def send_otp(request):
     else:
         return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
 
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def verify_otp(request):
-    phone = request.data.get('phone')
-    otp = request.data.get('otp')
-    if not phone or not otp:
-        return Response({'error': 'Phone and OTP are required'}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        user = CustomUser.objects.filter(phone=phone, role='customer').first()
-        if not user:
-            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-        email = user.email
-    except Exception as e:
-        return Response({'error': 'Database error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    success, message = verify_otp_util(email, otp)
-    if success:
-        # Delete OTP after successful verification
-        OTP.objects.filter(email=email).delete()
-        token = RefreshToken.for_user(user).access_token
-        return Response({'message': 'OTP verified successfully', 'token': str(token), 'role': user.role}, status=status.HTTP_200_OK)
-    else:
-        return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -188,7 +167,7 @@ def verify_scanner(request, scanner_hash):
 class OrderListCreateView(generics.ListCreateAPIView):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         if not self.request.user.is_authenticated:
@@ -214,12 +193,15 @@ class OrderListCreateView(generics.ListCreateAPIView):
             raise PermissionDenied("Invalid table session")
 
         items = serializer.validated_data.get("items", [])
-        total = sum(i["price"] * i.get("quantity", 1) for i in items)
+        total = sum(item["price"] * item.get("qty", 1) for item in items)
 
         serializer.save(
-            total=total,
-            table_no=table_no
-        )
+        customer=self.request.user,
+        total=total,
+        table_no=table_no
+    )
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def generate_scanner(request):
@@ -255,31 +237,25 @@ class OrderUpdateView(generics.RetrieveUpdateDestroyAPIView):
         return Order.objects.none()
 
     def perform_update(self, serializer):
-        print(f"Request data: {self.request.data}")  # Add logging for debugging
         user = self.request.user
-        if user.role == 'admin':
-            # Admins can update items, table_no, and status
-            if 'items' in self.request.data:
-                # Recalculate total, ensuring quantity is int
-                items = self.request.data['items']
-                for item in items:
-                    if isinstance(item.get('quantity'), str):
-                        try:
-                            item['quantity'] = int(item['quantity'])
-                        except ValueError:
-                            pass  # Let serializer handle validation
-                total = sum(item['price'] * item.get('quantity', 1) for item in items)
+
+        if user.role == 'chef':
+            if 'status' not in self.request.data:
+                raise PermissionDenied("Chef can update only status")
+            serializer.save(status=self.request.data['status'])
+
+        elif user.role == 'admin':
+            items = self.request.data.get('items')
+            if items:
+                total = sum(
+                item['price'] * item.get('qty', 1)
+                for item in items
+                )
                 serializer.save(total=total)
             else:
                 serializer.save()
-        elif user.role == 'chef':
-            # Chefs can only update status
-            if 'status' in self.request.data and len(self.request.data) == 1:
-                serializer.save()
-            else:
-                raise PermissionDenied("Chefs can only update status.")
         else:
-            raise PermissionDenied("Unauthorized to update orders.")
+            raise PermissionDenied("Unauthorized")
 
     def destroy(self, request, *args, **kwargs):
         user = self.request.user
@@ -558,7 +534,8 @@ def send_bill_email(request):
         if order.status in ['paid', 'customer_paid']:
             return Response({'error': 'Order is already paid'}, status=status.HTTP_400_BAD_REQUEST)
 
-        customer_email = order.customer.get('email')
+        customer_email = order.customer.email
+
         if not customer_email:
             return Response({'error': 'Customer email not found'}, status=status.HTTP_400_BAD_REQUEST)
 
