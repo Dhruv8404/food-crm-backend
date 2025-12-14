@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import PermissionDenied
 from django.contrib.auth import authenticate
-from django.contrib.auth.models import User as DjangoUser  # Use built-in for staff, custom for customers
+from .models import User as CustomUser
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import MenuItem, Order, User as CustomUser, Table, OTP
 from .serializers import MenuItemSerializer, OrderSerializer, UserSerializer, CustomerRegisterSerializer, StaffLoginSerializer, CustomerVerifySerializer, CustomerLoginSerializer, TableSerializer
@@ -16,22 +16,16 @@ import secrets
 import razorpay
 from io import BytesIO
 from django.core.files.base import ContentFile
-from .models import Table, TableQR
+from .models import Table
 from .serializers import (
     MenuItemSerializer, OrderSerializer, UserSerializer, 
     CustomerRegisterSerializer, StaffLoginSerializer, 
     CustomerVerifySerializer, CustomerLoginSerializer, 
-    TableSerializer, TableGenerationSerializer  # Add these
+    TableSerializer  # Add these
 )
 # Then update the generate_table function:
-import segno
-import base64
-import re
-from io import BytesIO
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 from django.conf import settings
-
+from .models import Scanner
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
@@ -167,6 +161,29 @@ def customer_login(request):
         except CustomUser.DoesNotExist:
             return Response({'error': 'Customer not found'}, status=status.HTTP_404_NOT_FOUND)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def verify_scanner(request, scanner_hash):
+    try:
+        scanner = Scanner.objects.get(hash=scanner_hash, active=True)
+
+        # Optional expiry
+        # if now() - scanner.created_at > timedelta(hours=12):
+        #     return Response({"valid": False, "reason": "SCANNER_EXPIRED"}, status=410)
+
+        tables = Table.objects.filter(
+            active=True,
+            session_id__isnull=True
+        ).values("table_no")
+
+        return Response({
+            "valid": True,
+            "scanner": scanner.name,
+            "tables": list(tables)
+        })
+
+    except Scanner.DoesNotExist:
+        return Response({"valid": False}, status=404)
 
 class OrderListCreateView(generics.ListCreateAPIView):
     queryset = Order.objects.all()
@@ -185,23 +202,44 @@ class OrderListCreateView(generics.ListCreateAPIView):
             return Order.objects.all()
         return Order.objects.none()
 
-def perform_create(self, serializer):
-    table_no = self.request.data.get("table_no")
-    session_id = self.request.data.get("session_id")
 
-    if table_no:
+
+    def perform_create(self, serializer):
+        table_no = self.request.data.get("table_no")
+        session_id = self.request.data.get("session_id")
+
         table = Table.objects.get(table_no=table_no)
 
         if not table.session_id or str(table.session_id) != session_id:
             raise PermissionDenied("Invalid table session")
 
-    items = serializer.validated_data.get('items', [])
-    total = sum(item['price'] * item.get('quantity', 1) for item in items)
+        items = serializer.validated_data.get("items", [])
+        total = sum(i["price"] * i.get("quantity", 1) for i in items)
 
-    serializer.save(
-        total=total,
-        table_no=table_no
+        serializer.save(
+            total=total,
+            table_no=table_no
+        )
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_scanner(request):
+    if request.user.role != "admin":
+        return Response({"error": "Permission denied"}, status=403)
+
+    hash_val = secrets.token_urlsafe(32)
+
+    scanner = Scanner.objects.create(
+        name=f"Main Scanner",
+        hash=hash_val,
+        active=True
     )
+
+    scan_url = f"{settings.FRONTEND_BASE_URL}/scan/{hash_val}"
+
+    return Response({
+        "scanner": scanner.name,
+        "scan_url": scan_url
+    })
 
 class OrderUpdateView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Order.objects.all()
@@ -257,25 +295,19 @@ def generate_table(request):
 
     table_numbers = []
 
-    # ✅ CASE 1: frontend sends count
     if "count" in request.data:
         count = int(request.data["count"])
-        last_table = Table.objects.order_by('-id').first()
-        start_num = int(last_table.table_no[1:]) + 1 if last_table else 1
+        last = Table.objects.order_by("-id").first()
+        start = int(last.table_no[1:]) + 1 if last else 1
+        table_numbers = [f"T{str(start+i).zfill(2)}" for i in range(count)]
 
-        for i in range(count):
-            table_numbers.append(f"T{str(start_num + i).zfill(2)}")
-
-    # ✅ CASE 2: frontend sends tables list
     elif "tables" in request.data:
         table_numbers = request.data["tables"]
 
-    # ❌ INVALID
     else:
         return Response({"error": "Invalid input"}, status=400)
 
     results = []
-    frontend_base = settings.FRONTEND_BASE_URL
 
     for table_no in table_numbers:
         hash_val = secrets.token_urlsafe(32)
@@ -287,27 +319,15 @@ def generate_table(request):
             created_by=request.user
         )
 
-        scan_url = f"{frontend_base}/scan/{table_no}/{hash_val}"
-
-        qr = segno.make(scan_url)
-        buffer = BytesIO()
-        qr.save(buffer, kind="png", scale=8, border=4)
-        buffer.seek(0)
-
-        file_name = f"qr_{table_no}_{hash_val[:6]}.png"
-        path = default_storage.save(
-            f"qr_codes/{file_name}",
-            ContentFile(buffer.getvalue())
-        )
+        scan_url = f"{settings.FRONTEND_BASE_URL}/scan/table/{table_no}/{hash_val}"
 
         results.append({
             "table_no": table_no,
-            "hash": hash_val,
-            "scan_url": scan_url,
-            "qr_code_url": request.build_absolute_uri(f"/media/{path}")
+            "scan_url": scan_url
         })
 
     return Response(results, status=201)
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def list_tables(request):
@@ -328,48 +348,6 @@ def list_tables(request):
 import uuid
 from django.utils.timezone import now
 
-from django.utils.timezone import now
-from datetime import timedelta
-import uuid
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def verify_table(request, table_no, hash_val):
-    try:
-        table = Table.objects.get(
-            table_no=table_no,
-            hash=hash_val,
-            active=True
-        )
-
-        # ⏳ QR expiry (30 minutes)
-        if now() - table.created_at > timedelta(minutes=30):
-            return Response(
-                {"valid": False, "reason": "QR_EXPIRED"},
-                status=410
-            )
-
-        # 🔐 Table already in use
-        if table.session_id:
-            return Response({
-                "valid": False,
-                "reason": "TABLE_IN_USE",
-                "table_no": table.table_no
-            }, status=409)
-
-        # 🔐 Lock table
-        table.session_id = uuid.uuid4()
-        table.locked_at = now()
-        table.save()
-
-        return Response({
-            "valid": True,
-            "table_no": table.table_no,
-            "session_id": str(table.session_id)
-        })
-
-    except Table.DoesNotExist:
-        return Response({"valid": False}, status=404)
-
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated])
 def delete_table(request, table_no):
@@ -383,7 +361,27 @@ def delete_table(request, table_no):
     except Table.DoesNotExist:
         return Response({'error': 'Table not found'}, status=status.HTTP_404_NOT_FOUND)
 
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def lock_table(request):
+    table_no = request.data.get("table_no")
 
+    if not table_no:
+        return Response({"error": "Table number required"}, status=400)
+
+    table = Table.objects.get(table_no=table_no, active=True)
+
+    if table.session_id:
+        return Response({"error": "Table already in use"}, status=409)
+
+    table.session_id = uuid.uuid4()
+    table.locked_at = now()
+    table.save()
+
+    return Response({
+        "table_no": table.table_no,
+        "session_id": str(table.session_id)
+    })
 
 @api_view(['GET'])
 @permission_classes([AllowAny])

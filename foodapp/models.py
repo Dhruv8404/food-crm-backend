@@ -1,7 +1,12 @@
+import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractUser
-import secrets
 from django.conf import settings
+from django.utils.timezone import now
+
+
+# ---------------- USER ----------------
+
 class User(AbstractUser):
     ROLE_CHOICES = [
         ('guest', 'Guest'),
@@ -9,32 +14,30 @@ class User(AbstractUser):
         ('chef', 'Chef'),
         ('admin', 'Admin'),
     ]
+
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='guest')
     phone = models.CharField(max_length=15, blank=True, null=True)
     email = models.EmailField(unique=True, null=True, blank=True)
 
     groups = models.ManyToManyField(
         'auth.Group',
-        verbose_name='groups',
-        blank=True,
-        help_text='The groups this user belongs to. A user will get all permissions granted to each of their groups.',
-        related_name='foodapp_user_set',
-        related_query_name='user',
+        related_name='foodapp_users',
+        blank=True
     )
     user_permissions = models.ManyToManyField(
         'auth.Permission',
-        verbose_name='user permissions',
-        blank=True,
-        help_text='Specific permissions for this user.',
-        related_name='foodapp_user_set',
-        related_query_name='user',
+        related_name='foodapp_users',
+        blank=True
     )
 
     def __str__(self):
         return f"{self.role} - {self.phone or self.username}"
 
+
+# ---------------- MENU ----------------
+
 class MenuItem(models.Model):
-    id = models.CharField(max_length=10, primary_key=True)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100)
     price = models.FloatField()
     description = models.TextField()
@@ -44,6 +47,33 @@ class MenuItem(models.Model):
     def __str__(self):
         return self.name
 
+
+# ---------------- TABLE ----------------
+
+class Table(models.Model):
+    table_no = models.CharField(max_length=10, unique=True)
+    hash = models.CharField(max_length=64, unique=True)
+    active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # 🔐 SESSION LOCKING
+    session_id = models.UUIDField(null=True, blank=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True
+    )
+
+    def __str__(self):
+        return self.table_no
+
+
+# ---------------- ORDERS ----------------
+
 class Order(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
@@ -52,16 +82,29 @@ class Order(models.Model):
         ('paid', 'Paid'),
         ('customer_paid', 'Customer Paid'),
     ]
-    id = models.CharField(max_length=20, primary_key=True)
-    items = models.JSONField()  # list of dicts: [{'id': 'm1', 'name': '...', 'price': 8.5, 'qty': 1}, ...]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    items = models.JSONField()  
+    # [{id, name, price, qty}]
+
     total = models.FloatField()
     status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='pending')
-    customer = models.JSONField()  # {'phone': '...', 'email': '...'}
-    table_no = models.CharField(max_length=10, blank=True, null=True)  # e.g., 'T1'
+
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='orders'
+    )
+
+    table_no = models.CharField(max_length=10, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Order {self.id} - {self.status}"
+
+
+# ---------------- OTP ----------------
 
 class OTP(models.Model):
     email = models.EmailField()
@@ -70,45 +113,18 @@ class OTP(models.Model):
     expires_at = models.DateTimeField()
 
     def is_expired(self):
-        from django.utils import timezone
-        return timezone.now() > self.expires_at
+        return now() > self.expires_at
 
     def __str__(self):
         return f"OTP for {self.email}"
 
 
+# ---------------- SCANNER ----------------
 
-import uuid
-from django.db import models
-from django.conf import settings
-
-class Table(models.Model):
-    table_no = models.CharField(max_length=10, unique=True)
+class Scanner(models.Model):
+    name = models.CharField(max_length=50)
     hash = models.CharField(max_length=64, unique=True)
     active = models.BooleanField(default=True)
 
-    # ⏳ QR creation time (already present, keep it)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    # 🔐 SESSION LOCKING (NEW)
-    session_id = models.UUIDField(null=True, blank=True)
-    locked_at = models.DateTimeField(null=True, blank=True)
-
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
-        null=True
-    )
-
     def __str__(self):
-        return self.table_no
-
-class TableQR(models.Model):
-    """Stores the generated QR code image for a table."""
-    table = models.OneToOneField(Table, on_delete=models.CASCADE, related_name='qr_code')
-    image = models.ImageField(upload_to='qr_codes/')
-    url = models.URLField()  # The URL encoded in the QR
-    generated_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"QR for {self.table.table_no}"
+        return self.name
