@@ -88,64 +88,41 @@ def customer_verify(request):
         'token': str(token),
         'role': 'customer'
     })
-# views.py
 
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from rest_framework import status
-from django.contrib.auth import authenticate
-from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import StaffLoginSerializer
-
-@api_view(["POST"])
+@api_view(['POST'])
 @permission_classes([AllowAny])
 def staff_login(request):
-    """
-    Staff (Admin / Chef) login using username & password.
-    """
-
     serializer = StaffLoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
 
-    username = serializer.validated_data["username"]
-    password = serializer.validated_data["password"]
+    user = authenticate(
+        username=serializer.validated_data['username'],
+        password=serializer.validated_data['password']
+    )
 
-    user = authenticate(username=username, password=password)
-
-    if user is None:
+    if not user:
         return Response(
-            {"detail": "Invalid username or password"},
+            {"error": "Invalid credentials"},
             status=status.HTTP_401_UNAUTHORIZED
-        )
-
-    if not user.is_active:
-        return Response(
-            {"detail": "Account disabled"},
-            status=status.HTTP_403_FORBIDDEN
         )
 
     if not user.is_staff:
         return Response(
-            {"detail": "Not authorized as staff"},
+            {"error": "Not allowed"},
             status=status.HTTP_403_FORBIDDEN
         )
 
-    # Assign role safely
     role = "admin" if user.is_superuser else "chef"
-    if user.role != role:
-        user.role = role
-        user.save(update_fields=["role"])
+    user.role = role
+    user.save(update_fields=["role"])
 
-    refresh = RefreshToken.for_user(user)
+    token = RefreshToken.for_user(user).access_token
 
     return Response({
         "message": "Login successful",
         "role": role,
-        "access": str(refresh.access_token),
-        "refresh": str(refresh)
-    }, status=status.HTTP_200_OK)
-
+        "token": str(token)
+    }, status=200)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
