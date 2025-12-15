@@ -355,11 +355,19 @@ def delete_table(request, table_no):
 @permission_classes([AllowAny])
 def lock_table(request):
     table_no = request.data.get("table_no")
+    hash_val = request.data.get("hash")
 
-    if not table_no:
-        return Response({"error": "Table number required"}, status=400)
+    if not table_no or not hash_val:
+        return Response({"error": "Invalid QR"}, status=400)
 
-    table = Table.objects.get(table_no=table_no, active=True)
+    try:
+        table = Table.objects.get(
+            table_no=table_no,
+            hash=hash_val,
+            active=True
+        )
+    except Table.DoesNotExist:
+        return Response({"error": "Invalid or expired QR"}, status=404)
 
     if table.session_id:
         return Response({"error": "Table already in use"}, status=409)
@@ -370,8 +378,9 @@ def lock_table(request):
 
     return Response({
         "table_no": table.table_no,
-        "session_id": str(table.session_id)
+        "session_id": str(table.session_id),
     })
+
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
