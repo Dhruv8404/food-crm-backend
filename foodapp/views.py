@@ -88,27 +88,64 @@ def customer_verify(request):
         'token': str(token),
         'role': 'customer'
     })
+# views.py
 
-@api_view(['POST'])
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework import status
+from django.contrib.auth import authenticate
+from rest_framework_simplejwt.tokens import RefreshToken
+from .serializers import StaffLoginSerializer
+
+@api_view(["POST"])
 @permission_classes([AllowAny])
 def staff_login(request):
-    serializer = StaffLoginSerializer(data=request.data)
-    if serializer.is_valid():
-        username = serializer.validated_data['username']
-        password = serializer.validated_data['password']
+    """
+    Staff (Admin / Chef) login using username & password.
+    """
 
-        user = authenticate(request, username=username, password=password)
-        if user:
-            user.is_active = True
-            role = 'admin' if user.is_superuser else 'chef'
-            user.role = role
-            user.save()
-            token = RefreshToken.for_user(user).access_token
-            return Response({'message': 'Login successful', 'role': role, 'token': str(token)}, status=status.HTTP_200_OK)
-        return Response({'error': 'Invalid credentials'}, status.HTTP_401_UNAUTHORIZED)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-# Alias for backward compatibility with URL
-verify_otp = customer_verify
+    serializer = StaffLoginSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    username = serializer.validated_data["username"]
+    password = serializer.validated_data["password"]
+
+    user = authenticate(username=username, password=password)
+
+    if user is None:
+        return Response(
+            {"detail": "Invalid username or password"},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    if not user.is_active:
+        return Response(
+            {"detail": "Account disabled"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    if not user.is_staff:
+        return Response(
+            {"detail": "Not authorized as staff"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Assign role safely
+    role = "admin" if user.is_superuser else "chef"
+    if user.role != role:
+        user.role = role
+        user.save(update_fields=["role"])
+
+    refresh = RefreshToken.for_user(user)
+
+    return Response({
+        "message": "Login successful",
+        "role": role,
+        "access": str(refresh.access_token),
+        "refresh": str(refresh)
+    }, status=status.HTTP_200_OK)
+
 
 @api_view(['POST'])
 @permission_classes([AllowAny])

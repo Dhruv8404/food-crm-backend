@@ -107,6 +107,14 @@ class CustomerLoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
 
+
+
 class StaffLoginSerializer(serializers.Serializer):
-    username = serializers.CharField()
-    password = serializers.CharField()
+    username = serializers.CharField(
+        max_length=150,
+        trim_whitespace=True
+    )
+    password = serializers.CharField(
+        write_only=True,
+        trim_whitespace=False
+    )
