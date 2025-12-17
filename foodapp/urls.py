@@ -23,5 +23,7 @@ urlpatterns = [
     path('payments/verify/', views.verify_payment, name='verify-payment'),
     path('send_bill_email/', views.send_bill_email, name='send-bill-email'),
     path('tables/lock/', views.lock_table),
-
+    path('menu/add/', views.add_menu_item),         # POST
+    path('menu/<str:pk>/', views.update_menu_item), # PUT
+    path('menu/<str:pk>/delete/', views.delete_menu_item)
 ]

@@ -18,12 +18,66 @@ import datetime
 from django.utils import timezone
 
 
+
+# 🔹 GET ALL MENU ITEMS (Public)
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def menu_list(request):
     items = MenuItem.objects.all()
     serializer = MenuItemSerializer(items, many=True)
     return Response(serializer.data)
+
+
+# 🔹 ADD MENU ITEM (Admin only)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def add_menu_item(request):
+    if request.user.role != 'admin':
+        return Response({'error': 'Only admin can add menu items'}, status=403)
+
+    serializer = MenuItemSerializer(data=request.data)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    return Response(serializer.errors, status=400)
+
+
+# 🔹 UPDATE MENU ITEM (Admin only)
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def update_menu_item(request, pk):
+    if request.user.role != 'admin':
+        return Response({'error': 'Only admin can update menu items'}, status=403)
+
+    try:
+        item = MenuItem.objects.get(pk=pk)
+    except MenuItem.DoesNotExist:
+        return Response({'error': 'Menu item not found'}, status=404)
+
+    serializer = MenuItemSerializer(item, data=request.data)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data)
+
+    return Response(serializer.errors, status=400)
+
+
+# 🔹 DELETE MENU ITEM (Admin only)
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_menu_item(request, pk):
+    if request.user.role != 'admin':
+        return Response({'error': 'Only admin can delete menu items'}, status=403)
+
+    try:
+        item = MenuItem.objects.get(pk=pk)
+    except MenuItem.DoesNotExist:
+        return Response({'error': 'Menu item not found'}, status=404)
+
+    item.delete()
+    return Response({'message': 'Menu item deleted successfully'})
+
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -96,6 +150,7 @@ def staff_login(request):
             return Response({'message': 'Login successful', 'role': role, 'token': str(token)}, status=status.HTTP_200_OK)
         return Response({'error': 'Invalid credentials'}, status.HTTP_401_UNAUTHORIZED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
