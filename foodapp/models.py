@@ -31,9 +31,11 @@ class User(AbstractUser):
 
     def __str__(self):
         return f"{self.role} - {self.phone or self.username}"
+import uuid
 
 class MenuItem(models.Model):
-    id = models.CharField(max_length=10, primary_key=True)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
     name = models.CharField(max_length=100)
     price = models.FloatField()
     description = models.TextField()
