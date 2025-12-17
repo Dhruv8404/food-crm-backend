@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import PermissionDenied
 from django.contrib.auth import authenticate
-from .models import User as CustomUser
+from django.contrib.auth.models import User as DjangoUser  # Use built-in for staff, custom for customers
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import MenuItem, Order, User as CustomUser, Table, OTP
 from .serializers import MenuItemSerializer, OrderSerializer, UserSerializer, CustomerRegisterSerializer, StaffLoginSerializer, CustomerVerifySerializer, CustomerLoginSerializer, TableSerializer
@@ -14,28 +14,8 @@ import random
 import string
 import secrets
 import razorpay
-from io import BytesIO
-from django.core.files.base import ContentFile
-from .models import Table
-from .serializers import (
-    MenuItemSerializer, OrderSerializer, UserSerializer, 
-    CustomerRegisterSerializer, StaffLoginSerializer, 
-    CustomerVerifySerializer, CustomerLoginSerializer, 
-    TableSerializer  # Add these
-)
-# Then update the generate_table function:
-from django.conf import settings
-from .models import Scanner
-
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-
-EMAIL_HOST_USER = 'pateldhruv8404@gmail.com'
-EMAIL_HOST_PASSWORD = 'chqmyfrojxnpwtid'  # Gmail App Password
-
+import datetime
+from django.utils import timezone
 
 
 @api_view(['GET'])
@@ -44,85 +24,78 @@ def menu_list(request):
     items = MenuItem.objects.all()
     serializer = MenuItemSerializer(items, many=True)
     return Response(serializer.data)
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def customer_register(request):
-    email = request.data.get('email')
-    phone = request.data.get('phone')
+    serializer = CustomerRegisterSerializer(data=request.data)
+    if serializer.is_valid():
+        phone = serializer.validated_data.get('phone')
+        email = serializer.validated_data['email']
 
-    if not email or not phone:
-        return Response({'error': 'Email and phone required'}, status=400)
+        # Check if customer exists by email (email is unique)
+        customer, created = CustomUser.objects.get_or_create(
+            email=email,
+            defaults={'role': 'customer', 'phone': phone, 'username': f"{email}_customer", 'is_active': True}
+        )
+        if not created:
+            # Update existing customer
+            customer.role = 'customer'
+            customer.phone = phone
+            customer.is_active = True
+            customer.set_unusable_password()
+            customer.save()
+        else:
+            customer.set_unusable_password()
+            customer.save()
 
-    user, _ = CustomUser.objects.get_or_create(
-        email=email,
-        defaults={
-            'phone': phone,
-            'role': 'customer',
-            'username': email
-        }
-    )
+        # Send OTP via email
+        success, message = send_otp_email(email)
+        if success:
+            return Response({'message': 'OTP sent successfully to your email'}, status=status.HTTP_200_OK)
+        else:
+            return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    send_otp_email(email)
-    return Response({'message': 'OTP sent'}, status=200)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def customer_verify(request):
-    email = request.data.get('email')
-    otp = request.data.get('otp')
+    print("Request data:", request.data)
+    serializer = CustomerVerifySerializer(data=request.data)
+    if serializer.is_valid():
+        otp = serializer.validated_data['otp']
+        email = serializer.validated_data['email']
 
-    if not email or not otp:
-        return Response({'error': 'Email & OTP required'}, status=400)
-
-    success, msg = verify_otp_util(email, otp)
-
-    if not success:
-        return Response({'error': msg}, status=400)
-
-    user = CustomUser.objects.get(email=email, role='customer')
-    OTP.objects.filter(email=email).delete()
-
-    token = RefreshToken.for_user(user).access_token
-
-    return Response({
-        'message': 'Verified',
-        'token': str(token),
-        'role': 'customer'
-    })
+        success, message = verify_otp_util(email, otp)
+        if success:
+            try:
+                user = CustomUser.objects.get(email=email, role='customer')
+                token = RefreshToken.for_user(user).access_token
+                return Response({'message': 'Verified successfully', 'role': 'customer', 'token': str(token)}, status=status.HTTP_200_OK)
+            except CustomUser.DoesNotExist:
+                return Response({'error': 'Customer not found'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def staff_login(request):
     serializer = StaffLoginSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
+    if serializer.is_valid():
+        username = serializer.validated_data['username']
+        password = serializer.validated_data['password']
 
-    user = authenticate(
-        username=serializer.validated_data['username'],
-        password=serializer.validated_data['password']
-    )
-
-    if not user:
-        return Response(
-            {"error": "Invalid credentials"},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-
-    if not user.is_staff:
-        return Response(
-            {"error": "Not allowed"},
-            status=status.HTTP_403_FORBIDDEN
-        )
-
-    role = "admin" if user.is_superuser else "chef"
-    user.role = role
-    user.save(update_fields=["role"])
-
-    token = RefreshToken.for_user(user).access_token
-
-    return Response({
-        "message": "Login successful",
-        "role": role,
-        "token": str(token)
-    }, status=200)
+        user = authenticate(request, username=username, password=password)
+        if user:
+            user.is_active = True
+            role = 'admin' if user.is_superuser else 'chef'
+            user.role = role
+            user.save()
+            token = RefreshToken.for_user(user).access_token
+            return Response({'message': 'Login successful', 'role': role, 'token': str(token)}, status=status.HTTP_200_OK)
+        return Response({'error': 'Invalid credentials'}, status.HTTP_401_UNAUTHORIZED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -137,6 +110,30 @@ def send_otp(request):
     else:
         return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
 
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def verify_otp(request):
+    phone = request.data.get('phone')
+    otp = request.data.get('otp')
+    if not phone or not otp:
+        return Response({'error': 'Phone and OTP are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = CustomUser.objects.filter(phone=phone, role='customer').first()
+        if not user:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        email = user.email
+    except Exception as e:
+        return Response({'error': 'Database error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    success, message = verify_otp_util(email, otp)
+    if success:
+        # Delete OTP after successful verification
+        OTP.objects.filter(email=email).delete()
+        token = RefreshToken.for_user(user).access_token
+        return Response({'message': 'OTP verified successfully', 'token': str(token), 'role': user.role}, status=status.HTTP_200_OK)
+    else:
+        return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -154,34 +151,11 @@ def customer_login(request):
         except CustomUser.DoesNotExist:
             return Response({'error': 'Customer not found'}, status=status.HTTP_404_NOT_FOUND)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def verify_scanner(request, scanner_hash):
-    try:
-        scanner = Scanner.objects.get(hash=scanner_hash, active=True)
-
-        # Optional expiry
-        # if now() - scanner.created_at > timedelta(hours=12):
-        #     return Response({"valid": False, "reason": "SCANNER_EXPIRED"}, status=410)
-
-        tables = Table.objects.filter(
-            active=True,
-            session_id__isnull=True
-        ).values("table_no")
-
-        return Response({
-            "valid": True,
-            "scanner": scanner.name,
-            "tables": list(tables)
-        })
-
-    except Scanner.DoesNotExist:
-        return Response({"valid": False}, status=404)
 
 class OrderListCreateView(generics.ListCreateAPIView):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get_queryset(self):
         if not self.request.user.is_authenticated:
@@ -195,47 +169,26 @@ class OrderListCreateView(generics.ListCreateAPIView):
             return Order.objects.all()
         return Order.objects.none()
 
-
-
     def perform_create(self, serializer):
-        table_no = self.request.data.get("table_no")
-        session_id = self.request.data.get("session_id")
-
-        table = Table.objects.get(table_no=table_no)
-
-        if not table.session_id or str(table.session_id) != session_id:
-            raise PermissionDenied("Invalid table session")
-
-        items = serializer.validated_data.get("items", [])
-        total = sum(item["price"] * item.get("qty", 1) for item in items)
-
-        serializer.save(
-        customer=self.request.user,
-        total=total,
-        table_no=table_no
-    )
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def generate_scanner(request):
-    if request.user.role != "admin":
-        return Response({"error": "Permission denied"}, status=403)
-
-    hash_val = secrets.token_urlsafe(32)
-
-    scanner = Scanner.objects.create(
-        name=f"Main Scanner",
-        hash=hash_val,
-        active=True
-    )
-
-    scan_url = f"{settings.FRONTEND_BASE_URL}/scan/{hash_val}"
-
-    return Response({
-        "scanner": scanner.name,
-        "scan_url": scan_url
-    })
+        # Set customer from request.user
+        table_no = serializer.validated_data.get('table_no') or self.request.data.get('table_no')
+        if self.request.user.is_authenticated and self.request.user.role == 'admin' and not table_no:
+            # Admin creating parcel order
+            customer_data = {}
+        elif self.request.user.is_authenticated:
+            customer_data = {'phone': self.request.user.phone, 'email': self.request.user.email}
+        else:
+            # Unauthenticated user (table order)
+            customer_data = {}
+        # Calculate total from items
+        items = serializer.validated_data.get('items', [])
+        total = sum(item['price'] * item.get('quantity', 1) for item in items)
+        # Generate unique id
+        while True:
+            order_id = 'ord_' + ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+            if not Order.objects.filter(id=order_id).exists():
+                break
+        serializer.save(customer=customer_data, total=total, table_no=table_no, id=order_id)
 
 class OrderUpdateView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Order.objects.all()
@@ -251,97 +204,148 @@ class OrderUpdateView(generics.RetrieveUpdateDestroyAPIView):
         return Order.objects.none()
 
     def perform_update(self, serializer):
+        print(f"Request data: {self.request.data}")  # Add logging for debugging
         user = self.request.user
-
-        if user.role == 'chef':
-            if 'status' not in self.request.data:
-                raise PermissionDenied("Chef can update only status")
-            serializer.save(status=self.request.data['status'])
-
-        elif user.role == 'admin':
-            items = self.request.data.get('items')
-            if items:
-                total = sum(
-                item['price'] * item.get('qty', 1)
-                for item in items
-                )
+        if user.role == 'admin':
+            # Admins can update items, table_no, and status
+            if 'items' in self.request.data:
+                # Recalculate total, ensuring quantity is int
+                items = self.request.data['items']
+                for item in items:
+                    if isinstance(item.get('quantity'), str):
+                        try:
+                            item['quantity'] = int(item['quantity'])
+                        except ValueError:
+                            pass  # Let serializer handle validation
+                total = sum(item['price'] * item.get('quantity', 1) for item in items)
                 serializer.save(total=total)
             else:
                 serializer.save()
+        elif user.role == 'chef':
+            # Chefs can only update status
+            if 'status' in self.request.data and len(self.request.data) == 1:
+                serializer.save()
+            else:
+                raise PermissionDenied("Chefs can only update status.")
         else:
-            raise PermissionDenied("Unauthorized")
+            raise PermissionDenied("Unauthorized to update orders.")
 
     def destroy(self, request, *args, **kwargs):
         user = self.request.user
         if user.role != 'admin':
             raise PermissionDenied("Only admins can delete orders.")
         return super().destroy(request, *args, **kwargs)
-# In your views.py
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+
 def generate_table(request):
-    if request.user.role != "admin":
-        return Response({"error": "Permission denied"}, status=403)
+    if not request.user.is_authenticated or request.user.role != 'admin':
+        return Response({'error': 'Only admins can generate tables'}, status=status.HTTP_403_FORBIDDEN)
 
-    table_numbers = []
+    range_input = request.data.get('range', '1')
+    table_nos = []
 
-    if "count" in request.data:
-        count = int(request.data["count"])
-        last = Table.objects.order_by("-id").first()
-        start = int(last.table_no[1:]) + 1 if last else 1
-        table_numbers = [f"T{str(start+i).zfill(2)}" for i in range(count)]
-
-    elif "tables" in request.data:
-        table_numbers = request.data["tables"]
-
+    if '-' in range_input:
+        # Range like T1-T5
+        start, end = range_input.split('-')
+        if start.startswith('T') and end.startswith('T'):
+            try:
+                start_num = int(start[1:])
+                end_num = int(end[1:])
+                if start_num > end_num or end_num - start_num > 50:
+                    return Response({'error': 'Invalid range'}, status=status.HTTP_400_BAD_REQUEST)
+                table_nos = [f'T{i}' for i in range(start_num, end_num + 1)]
+            except ValueError:
+                return Response({'error': 'Invalid range format'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({'error': 'Range must be like T1-T5'}, status=status.HTTP_400_BAD_REQUEST)
+    elif range_input.startswith('T'):
+        # Single table like T1
+        table_nos = [range_input]
     else:
-        return Response({"error": "Invalid input"}, status=400)
+        # Number, generate that many sequential
+        try:
+            count = int(range_input)
+            if count < 1 or count > 50:
+                return Response({'error': 'Count must be between 1 and 50'}, status=status.HTTP_400_BAD_REQUEST)
+            last_table = Table.objects.order_by('-id').first()
+            if last_table:
+                try:
+                    num = int(last_table.table_no[1:]) + 1
+                except ValueError:
+                    num = 1
+            else:
+                num = 1
+            table_nos = [f'T{num + i}' for i in range(count)]
+        except ValueError:
+            return Response({'error': 'Invalid input'}, status=status.HTTP_400_BAD_REQUEST)
 
     results = []
+    for table_no in table_nos:
+        if Table.objects.filter(table_no=table_no).exists():
+            table = Table.objects.get(table_no=table_no)
+            if 'hash' in request.data:
+                hash_value = request.data['hash']
+                table.hash = hash_value
+                table.save()
+            else:
+                hash_value = table.hash  # Keep existing hash
+        else:
+            hash_value = request.data.get('hash', secrets.token_hex(16))
+            table = Table.objects.create(table_no=table_no, hash=hash_value)
 
-    for table_no in table_numbers:
-        hash_val = secrets.token_urlsafe(32)
-
-        table = Table.objects.create(
-            table_no=table_no,
-            hash=hash_val,
-            active=True,
-            created_by=request.user
-        )
-
-        scan_url = f"{settings.FRONTEND_BASE_URL}/scan/table/{table_no}/{hash_val}"
+        base_url = getattr(settings, 'BASE_URL', 'http://localhost:3000')
+        url = f"{base_url}/{hash_value}/{table.table_no}"
 
         results.append({
-            "table_no": table_no,
-            "scan_url": scan_url
+            'table_no': table.table_no,
+            'hash': hash_value,
+            'url': url
         })
 
-    return Response(results, status=201)
+    return Response(results, status=status.HTTP_201_CREATED)
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
-def list_tables(request):
-    frontend_base = settings.FRONTEND_BASE_URL
+def verify_table(request, table_no=None, hash_val=None):
+    # Allow both URL params and query params
+    if not table_no or not hash_val:
+        table_no = request.GET.get('table')
+        hash_val = request.GET.get('hash')
 
-    tables = Table.objects.filter(active=True)
+    if not table_no or not hash_val:
+        return Response(
+            {'error': 'Missing table or hash'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
-    return Response([
-        {
-            "table_no": t.table_no,
-            "hash": t.hash,
-            "scan_url": f"{frontend_base}/scan/{t.table_no}/{t.hash}"
-        }
-        for t in tables
-    ])
+    try:
+        table = Table.objects.get(
+            table_no=table_no,
+            hash=hash_val,
+            active=True
+        )
 
+        # ⏱️ session validity (30 minutes)
+        SESSION_EXPIRY_SECONDS = 30 * 60
 
-import uuid
-from django.utils.timezone import now
+        return Response({
+            'valid': True,
+            'table_no': table.table_no,
+            'session_expires_in': SESSION_EXPIRY_SECONDS,
+            'server_time': timezone.now().isoformat()
+        }, status=status.HTTP_200_OK)
 
-@api_view(["DELETE"])
+    except Table.DoesNotExist:
+        return Response(
+            {'valid': False, 'error': 'Invalid or inactive table'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+@api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def delete_table(request, table_no):
-
     if request.user.role != 'admin':
         return Response({'error': 'Only admins can delete tables'}, status=status.HTTP_403_FORBIDDEN)
     try:
@@ -351,35 +355,17 @@ def delete_table(request, table_no):
     except Table.DoesNotExist:
         return Response({'error': 'Table not found'}, status=status.HTTP_404_NOT_FOUND)
 
-@api_view(['POST'])
+@api_view(['GET'])
 @permission_classes([AllowAny])
-def lock_table(request):
-    table_no = request.data.get("table_no")
-    hash_val = request.data.get("hash")
-
-    if not table_no or not hash_val:
-        return Response({"error": "Invalid QR"}, status=400)
-
-    try:
-        table = Table.objects.get(
-            table_no=table_no,
-            hash=hash_val,
-            active=True
-        )
-    except Table.DoesNotExist:
-        return Response({"error": "Invalid or expired QR"}, status=404)
-
-    if table.session_id:
-        return Response({"error": "Table already in use"}, status=409)
-
-    table.session_id = uuid.uuid4()
-    table.locked_at = now()
-    table.save()
-
-    return Response({
-        "table_no": table.table_no,
-        "session_id": str(table.session_id),
-    })
+def list_tables(request):
+    return Response([
+        {
+            "table_no": t.table_no,
+            "hash": t.hash,
+            "scan_url": f"{settings.FRONTEND_BASE_URL}/scan/{t.table_no}/{t.hash}"
+        }
+        for t in Table.objects.filter(active=True)
+    ])
 
 
 @api_view(['GET'])
@@ -557,8 +543,7 @@ def send_bill_email(request):
         if order.status in ['paid', 'customer_paid']:
             return Response({'error': 'Order is already paid'}, status=status.HTTP_400_BAD_REQUEST)
 
-        customer_email = order.customer.email
-
+        customer_email = order.customer.get('email')
         if not customer_email:
             return Response({'error': 'Customer email not found'}, status=status.HTTP_400_BAD_REQUEST)
 

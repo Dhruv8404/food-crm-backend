@@ -1,120 +1,78 @@
 from rest_framework import serializers
 from .models import MenuItem, Order, User, Table
-import re
-
-
-# ---------------- MENU ----------------
 
 class MenuItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = MenuItem
-        fields = "__all__"
-
-
-# ---------------- ORDERS ----------------
+        fields = '__all__'
 
 class OrderSerializer(serializers.ModelSerializer):
-
     class Meta:
         model = Order
         fields = '__all__'
-        read_only_fields = ['id', 'total', 'customer', 'created_at']
+        read_only_fields = ['total', 'id', 'customer']
 
-    def validate_items(self, items):
-        if not isinstance(items, list) or not items:
-            raise serializers.ValidationError("Items must be a non-empty list")
+    def validate(self, data):
+        print("Validating order data:", data)  # Add logging for debugging
+        # Only validate items if items are being updated (not for partial updates with just status)
+        if 'items' in data:
+            items = data.get('items', [])
+            if not items:
+                raise serializers.ValidationError("Items cannot be empty.")
 
-        for item in items:
-            if 'id' not in item or 'qty' not in item:
-                raise serializers.ValidationError(
-                    "Each item must contain id and qty"
-                )
-            if not isinstance(item['qty'], int) or item['qty'] < 1:
-                raise serializers.ValidationError("qty must be >= 1")
+            # Validate each item has required fields
+            for item in items:
+                if not isinstance(item, dict):
+                    raise serializers.ValidationError("Each item must be a dictionary.")
+                if 'id' not in item:
+                    raise serializers.ValidationError("Each item must have an 'id' field.")
+                # Fetch price and name if not provided
+                if 'price' not in item or 'name' not in item:
+                    try:
+                        menu_item = MenuItem.objects.get(id=item['id'])
+                        if 'price' not in item:
+                            item['price'] = menu_item.price
+                        if 'name' not in item:
+                            item['name'] = menu_item.name
+                    except MenuItem.DoesNotExist:
+                        raise serializers.ValidationError(f"Menu item with id {item['id']} does not exist.")
+                quantity = item.get('quantity', 1)
+                if isinstance(quantity, str):
+                    try:
+                        quantity = int(quantity)
+                        item['quantity'] = quantity
+                    except ValueError:
+                        raise serializers.ValidationError("Quantity must be a valid integer.")
+                if not isinstance(quantity, int) or quantity < 1:
+                    raise serializers.ValidationError("Quantity must be a positive integer.")
 
-        return items
-
-
-# ---------------- USERS ----------------
+        status = data.get('status')
+        if status and status not in dict(Order.STATUS_CHOICES):
+            raise serializers.ValidationError("Invalid status choice.")
+        return data
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "email", "phone", "role"]
-
-
-# ---------------- TABLE ----------------
+        fields = '__all__'
 
 class TableSerializer(serializers.ModelSerializer):
-    qr_code_url = serializers.SerializerMethodField()
-
     class Meta:
         model = Table
-        fields = [
-            'id', 'table_no', 'hash', 'active',
-            'created_at', 'created_by', 'qr_code_url'
-        ]
-        read_only_fields = ['hash', 'created_at', 'created_by']
+        fields = '__all__'
 
-    def get_qr_code_url(self, obj):
-        return None
-
-
-class TableGenerationSerializer(serializers.Serializer):
-    range = serializers.CharField(required=True)
-
-    def validate_range(self, value):
-        value = value.strip().upper()
-
-        if value.isdigit():
-            return {"mode": "count", "count": int(value)}
-
-        if re.match(r"^T\d+$", value):
-            return {"mode": "single", "tables": [value]}
-
-        if "-" in value:
-            start, end = value.split("-")
-            s, e = int(start[1:]), int(end[1:])
-            if s > e:
-                raise serializers.ValidationError("Invalid range")
-            return {
-                "mode": "multiple",
-                "tables": [f"T{str(i).zfill(2)}" for i in range(s, e + 1)]
-            }
-
-        if "," in value:
-            return {
-                "mode": "multiple",
-                "tables": [t.strip() for t in value.split(",")]
-            }
-
-        raise serializers.ValidationError("Invalid table format")
-
-
-# ---------------- AUTH ----------------
-
+# For auth
 class CustomerRegisterSerializer(serializers.Serializer):
+    phone = serializers.CharField(max_length=10, required=False)
     email = serializers.EmailField()
-    phone = serializers.CharField(max_length=15)
 
+class StaffLoginSerializer(serializers.Serializer):
+    username = serializers.CharField()
+    password = serializers.CharField()
 
 class CustomerVerifySerializer(serializers.Serializer):
-    email = serializers.EmailField()
     otp = serializers.CharField(max_length=6)
-
+    email = serializers.EmailField()
 
 class CustomerLoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
-
-
-
-
-class StaffLoginSerializer(serializers.Serializer):
-    username = serializers.CharField(
-        max_length=150,
-        trim_whitespace=True
-    )
-    password = serializers.CharField(
-        write_only=True,
-        trim_whitespace=False
-    )
