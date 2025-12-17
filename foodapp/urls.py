@@ -22,4 +22,6 @@ urlpatterns = [
     path('payments/create/', views.create_payment_order, name='create-payment-order'),
     path('payments/verify/', views.verify_payment, name='verify-payment'),
     path('send_bill_email/', views.send_bill_email, name='send-bill-email'),
+    path('tables/lock/', views.lock_table),
+
 ]

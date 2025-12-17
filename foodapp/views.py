@@ -1,4 +1,3 @@
-from curl_cffi import request
 from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -206,7 +205,8 @@ class OrderListCreateView(generics.ListCreateAPIView):
 
     # Calculate total
         items = serializer.validated_data.get("items", [])
-        total = sum(item["price"] * item.get("quantity", 1) for item in items)
+        total = sum(item["price"] * item.get("qty", 1) for item in items)
+
 
     # Generate order ID
         while True:
@@ -223,6 +223,34 @@ class OrderListCreateView(generics.ListCreateAPIView):
         table_no=table_no
     )
 
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def lock_table(request):
+    table_no = request.data.get("table_no")
+
+    if not table_no:
+        return Response({"error": "table_no required"}, status=400)
+
+    try:
+        table = Table.objects.get(table_no=table_no, active=True)
+
+        if table.locked:
+            return Response({"error": "Table already in use"}, status=403)
+
+        session_id = secrets.token_hex(16)
+
+        table.locked = True
+        table.session_id = session_id
+        table.locked_at = timezone.now()
+        table.save()
+
+        return Response({
+            "table_no": table.table_no,
+            "session_id": session_id
+        })
+
+    except Table.DoesNotExist:
+        return Response({"error": "Invalid table"}, status=404)
 
 class OrderUpdateView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Order.objects.all()
@@ -246,12 +274,15 @@ class OrderUpdateView(generics.RetrieveUpdateDestroyAPIView):
                 # Recalculate total, ensuring quantity is int
                 items = self.request.data['items']
                 for item in items:
-                    if isinstance(item.get('quantity'), str):
+                    if isinstance(item.get("qty"), str):
+                        item["qty"] = int(item["qty"])
+
                         try:
                             item['quantity'] = int(item['quantity'])
                         except ValueError:
                             pass  # Let serializer handle validation
-                total = sum(item['price'] * item.get('quantity', 1) for item in items)
+                total = sum(item["price"] * item.get("qty", 1) for item in items)
+
                 serializer.save(total=total)
             else:
                 serializer.save()
@@ -554,6 +585,7 @@ def verify_payment(request):
         if orders.exists():
             # Keep orders as pending (online payment completed, chefs can see and start preparing)
             # No status change needed - orders remain pending for chef visibility
+            orders.update(status="customer_paid")
 
             return Response({
                 'message': 'Payment verified successfully',

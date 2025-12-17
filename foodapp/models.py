@@ -76,9 +76,14 @@ class OTP(models.Model):
         return f"OTP for {self.email}"
 
 class Table(models.Model):
-    table_no = models.CharField(max_length=10, unique=True)  # e.g., 'T1', 'T2'
-    hash = models.CharField(max_length=64, unique=True)  # unique hash for security
+    table_no = models.CharField(max_length=10, unique=True)
+    hash = models.CharField(max_length=64, unique=True)
     active = models.BooleanField(default=True)
+
+    locked = models.BooleanField(default=False)
+    session_id = models.CharField(max_length=64, null=True, blank=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
