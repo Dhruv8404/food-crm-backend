@@ -3,9 +3,12 @@ from rest_framework import serializers
 from .models import MenuItem, Order, User, Table
 
 class MenuItemSerializer(serializers.ModelSerializer):
+    image = serializers.CharField(required=False)
+
     class Meta:
         model = MenuItem
-        fields = '__all__'
+        fields = "__all__"
+
 
 
 class OrderSerializer(serializers.ModelSerializer):

@@ -1,3 +1,4 @@
+
 from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -16,68 +17,100 @@ import secrets
 import razorpay
 import datetime
 from django.utils import timezone
+import uuid
+from django.core.files.storage import default_storage
 
 
 
 # 🔹 GET ALL MENU ITEMS (Public)
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def menu_list(request):
-    items = MenuItem.objects.all()
-    serializer = MenuItemSerializer(items, many=True)
-    return Response(serializer.data)
-
-
-# 🔹 ADD MENU ITEM (Admin only)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def add_menu_item(request):
     if request.user.role != 'admin':
-        return Response({'error': 'Only admin can add menu items'}, status=403)
+        return Response(
+            {'error': 'Only admin can add menu items'},
+            status=status.HTTP_403_FORBIDDEN
+        )
 
-    serializer = MenuItemSerializer(data=request.data)
+    data = request.data.copy()
+
+    # 📸 Handle image upload
+    if 'image' in request.FILES:
+        image_file = request.FILES['image']
+        filename = f"menu/{uuid.uuid4()}_{image_file.name}"
+        file_path = default_storage.save(filename, image_file)
+        data['image'] = file_path
+
+    serializer = MenuItemSerializer(data=data)
+
     if serializer.is_valid():
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    return Response(serializer.errors, status=400)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# 🔹 UPDATE MENU ITEM (Admin only)
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
 def update_menu_item(request, pk):
     if request.user.role != 'admin':
-        return Response({'error': 'Only admin can update menu items'}, status=403)
+        return Response(
+            {'error': 'Only admin can update menu items'},
+            status=status.HTTP_403_FORBIDDEN
+        )
 
     try:
         item = MenuItem.objects.get(pk=pk)
     except MenuItem.DoesNotExist:
-        return Response({'error': 'Menu item not found'}, status=404)
+        return Response(
+            {'error': 'Menu item not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
 
-    serializer = MenuItemSerializer(item, data=request.data)
+    data = request.data.copy()
+
+    # 📸 Handle image update
+    if 'image' in request.FILES:
+        # delete old image if exists
+        if item.image:
+            default_storage.delete(item.image)
+
+        image_file = request.FILES['image']
+        filename = f"menu/{uuid.uuid4()}_{image_file.name}"
+        file_path = default_storage.save(filename, image_file)
+        data['image'] = file_path
+
+    serializer = MenuItemSerializer(item, data=data)
+
     if serializer.is_valid():
         serializer.save()
-        return Response(serializer.data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
-    return Response(serializer.errors, status=400)
-
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # 🔹 DELETE MENU ITEM (Admin only)
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def delete_menu_item(request, pk):
     if request.user.role != 'admin':
-        return Response({'error': 'Only admin can delete menu items'}, status=403)
+        return Response(
+            {'error': 'Only admin can delete menu items'},
+            status=status.HTTP_403_FORBIDDEN
+        )
 
     try:
         item = MenuItem.objects.get(pk=pk)
     except MenuItem.DoesNotExist:
-        return Response({'error': 'Menu item not found'}, status=404)
+        return Response(
+            {'error': 'Menu item not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if item.image:
+        default_storage.delete(item.image)
 
     item.delete()
     return Response({'message': 'Menu item deleted successfully'})
-
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
