@@ -2,6 +2,9 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path('menu/add/', views.add_menu_item),
+    path('menu/<uuid:pk>/update/', views.update_menu_item),
+    path('menu/<uuid:pk>/delete/', views.delete_menu_item),
     path('menu/', views.menu_list, name='menu-list'),
     path('auth/customer/register/', views.customer_register, name='customer-register'),
     path('auth/customer/verify/', views.customer_verify, name='customer-verify'),

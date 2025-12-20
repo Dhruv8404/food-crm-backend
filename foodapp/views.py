@@ -48,6 +48,13 @@ def add_menu_item(request):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+# 🔹 GET ALL MENU ITEMS (Public)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def menu_list(request):
+    items = MenuItem.objects.all()
+    serializer = MenuItemSerializer(items, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 @api_view(['PUT'])
